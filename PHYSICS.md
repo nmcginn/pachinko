@@ -25,7 +25,10 @@ Board plane, metres. x to the right, y up; gravity pulls toward -y. `render/` fl
 | Ball–rail restitution      | 0.4                     | `RAIL_MATERIAL`        | PLAN.md starting value. Tuning knob.                                           |
 | Ball–rail friction         | 0.05                    | `RAIL_MATERIAL`        | Tuning knob. See "Friction".                                                   |
 | Max friction loss          | 2/7 of tangential speed | `MAX_FRICTION_LOSS`    | Solid sphere spinning up to rolling. See "Friction".                           |
-| Max launch speed           | 5 m/s                   | `MAX_LAUNCH_SPEED_MPS` | Provisional. See "Max launch speed". M2 confirms it against the real board.    |
+| Max launch speed           | 5 m/s                   | `MAX_LAUNCH_SPEED_MPS` | Confirmed on `boards/classic.json` in M2. See "Max launch speed".              |
+| Min launch speed (classic) | 3.2 m/s                 | `boards/classic.json`  | Power 0. Fouls start below about 3.0 m/s. See "Launch speed range".            |
+| Auto-fire interval         | 0.6 s (1200 steps)      | `FIRE_INTERVAL_STEPS`  | PLAN.md: 100 balls/min. Game timing, counted in sim steps.                     |
+| Broadphase cell            | 20 mm                   | `GRID_CELL_M`          | Numerical. Changes speed only, never results. See "Broadphase".                |
 | Contact slop               | 1 nm                    | `CONTACT_SLOP_M`       | Numerical, not physical: floating-point error after placing a ball at contact. |
 | Impacts per step, per ball | 8                       | `MAX_IMPACTS_PER_STEP` | Numerical. Only a wedged ball uses them all.                                   |
 
@@ -39,7 +42,21 @@ The rule is a backstop, not the defence. Collisions are swept (see "Collision mo
 
 ### Max launch speed
 
-On a typical machine the ball climbs about 0.45 m up the guide rail to the top of the playfield. Reaching the top takes at least √(2·g·h) ≈ 3.0 m/s with no losses. The handle has to reach comfortably past that, so a full-power shot overshoots to the far side of the board, as on real machines. 5 m/s leaves room for rail contact and drag losses, which M2 will measure on `boards/classic.json`. It is provisional until then: changing it later is a logged tuning change like any other.
+On a typical machine the ball climbs about 0.45 m up the guide rail to the top of the playfield. Reaching the top takes at least √(2·g·h) ≈ 3.0 m/s with no losses. The handle has to reach comfortably past that, so a full-power shot overshoots to the far side of the board, as on real machines. 5 m/s leaves room for rail contact and drag losses.
+
+M2 checked it on `boards/classic.json`, where the lane climbs 0.41 m from the launch point to the top of the outer rail: a 5 m/s shot runs over the top and round to the return bumper at about 2 o'clock, the far side of the board, and lands in the field from there (`tests/sim/classic.test.ts`). No change.
+
+### Launch speed range (M2)
+
+The handle maps power linearly from the board's `launcher.minSpeedMps` (power 0) to `MAX_LAUNCH_SPEED_MPS` (power 1). The minimum is board data because it depends on the lane.
+
+On the classic board a shot needs about 3.0 m/s to get past the end of the inner rail; slower ones roll back down the lane into the foul pocket. Measured by sweeping the launch speed: 2.9 m/s fouls, 3.0 m/s reaches the field. Power 0 is set at 3.2 m/s, about 7% clear, so no handle setting fouls (tested: 5% below power 0 still clears). Real handles do have a weak range that fouls. A foul goes back to the tray (PLAN.md game rules), so a weak range would cost the player nothing; it was left out because it would only be dead travel on the handle.
+
+Where shots land, at the M2 geometry: power 0 to about 0.1 peels off the outer rail near the top and drops into the top of the field, first touching a nail between x = 0.29 m (power 0, just right of the 0.25 m centre line) and 0.39 m (power 0.1). The ball holds to the curved rail while v²/R > g·sin φ, so the peel-off point moves right with speed. From about 0.15 up, the ball stays on the rail to the return bumper and drops into the field's right side. Nothing lands left of centre. That narrow band is how the speeds work out, not a choice; it is the first thing M3 will look at when tuning for 18–24 spins per ¥1000.
+
+### Rails as polylines
+
+Curved rails are polylines with a vertex every 2.5°. A ball riding the inside of one meets a slight corner at every vertex and takes a small impact each time, with friction. Summed over an arc, the normal impulse is m·v·Δθ either way: corners or a true curve, it is what turns the ball. So total friction loss is about μ(1 + e)·v·Δθ in both cases, and finer segments would cost speed without changing the result much. On the classic lane, μ = 0.05 and e = 0.4 take roughly 20% off the speed over the half-turn to the top. Real balls roll along the rail and lose less, which is another reason the rail friction is a tuning knob for M3.
 
 ### Collision model
 
@@ -51,7 +68,15 @@ Balls are points swept against inflated shapes. A nail of radius r becomes a dis
 
 Because the ball is stopped at the surface rather than allowed to overlap and then pushed out, it never ends a step inside geometry, at any speed. Pushing out would also add potential energy from nowhere whenever the push had an upward component. A ball touching a surface (within the 1 nm slop) and moving into it gets an impact at t = 0; one moving along it or away does not.
 
-There is no broadphase yet: each ball tests every shape. That is fine for the M1 test scenes (110 shapes, about 310k ball-steps per second on the dev container) and is the first thing M3 will need (see PLAN.md Status).
+### Broadphase (M2)
+
+Each ball used to test every shape. On the classic board (217 nails, 175 rail segments) that ran at about 40k ball-steps per second on the dev container: a few balls in flight at 2000 steps/s would take most of a core in the browser. `src/sim/broadphase.ts` now indexes the static shapes in a 20 mm grid. A step only sweeps against the shapes listed in the cells its move overlaps; each shape is listed in every cell from which a ball centre could touch it (inflated bounding box, ball radius plus 1 µm).
+
+Candidate lists are in ascending shape index, the order the brute-force pass used, and the earliest-hit search keeps the first of equal times, so results are bit-for-bit the same as testing every shape. `tests/sim/broadphase.test.ts` checks that on the classic board and the closed grid, with `broadphase: false` as the reference. Measured on the classic board: about 274k ball-steps per second, 6.8× faster.
+
+### Pockets (sensors)
+
+Pockets are polygons with no physical response; their walls, where they have them, are ordinary rails. A ball is captured when its centre enters one, tested against each straight piece of its path through the step (between impacts), so a fast ball can't skip a thin pocket. A pocket reached before the next impact wins over the impact. The ball is stopped at the point of entry and removed.
 
 ### Energy and the resting threshold
 
@@ -96,6 +121,8 @@ The ball rolls on the backboard under the normal component of gravity, g·sin 3�
 - Ball spin is not modelled. Friction's effect on spin is approximated by the 2/7 cap and by frictionless rolling contact (see "Friction"). If ball behaviour on rails looks wrong in M2, spin is the first suspect.
 - A ball is never placed inside geometry: `addBall` refuses it, since nothing ever pushes a ball out of a shape.
 - Collision response treats nails and rails as fixed (infinite mass). Nails don't flex.
+- A launched ball appears at the bottom of the lane already at launch speed. The hammer stroke isn't modelled.
+- No ball–ball collisions until M5. Two balls in the lane at once pass through each other.
 
 ## Tuning log
 
@@ -104,3 +131,7 @@ Record every deliberate change to a physics constant or board geometry: date, wh
 ### 2026-10-19: initial values (M1)
 
 First values for every constant in the table above, set with M1. Not a change, so there are no before and after numbers; the Monte Carlo tool arrives in M3, and M3's tuning starts from these.
+
+### 2026-10-19: classic board and launch range (M2)
+
+New, not changed: `boards/classic.json` (generated once by `tools/gen-classic-board.ts`, which documents the design parameters) and its `launcher.minSpeedMps` of 3.2 m/s. `MAX_LAUNCH_SPEED_MPS` was checked against the board and stays at 5 m/s. No physics constant changed. No Monte Carlo numbers yet: the tool arrives in M3, which tunes from here.

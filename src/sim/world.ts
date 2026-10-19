@@ -7,7 +7,9 @@
 //   1. velocity += in-plane gravity × dt, then backboard drag (implicit)
 //   2. sweep the step's displacement against all geometry, stop at the
 //      earliest impact, apply the impulse, and sweep the rest of the step
-//   3. remove the ball if it has left the world bounds
+//   3. capture the ball if its path entered a sensor (a pocket), stopping it
+//      at the point of entry
+//   4. remove the ball if it was captured or has left the world bounds
 // Every constant here is derived or justified in PHYSICS.md.
 
 import {
@@ -21,6 +23,8 @@ import {
   sweepCapsule,
   sweepDisc,
 } from './collide';
+import { type Candidates, type StaticGrid, createStaticGrid, queryGrid } from './broadphase';
+import { type SensorShape, sensorEntryT } from './sensor';
 
 /** Sim timestep. PLAN.md: 1/2000 s or finer, so a ball at max launch speed moves less than its radius per step. */
 export const SIM_STEP_S = 1 / 2000;
@@ -60,6 +64,15 @@ const DRAG_FACTOR = 1 / (1 + BACKBOARD_DRAG_PER_S * SIM_STEP_S);
 
 export interface Ball extends BallState {
   readonly id: number;
+  /** Position at the start of the latest step, for render interpolation. Equal to x, y until the first step. */
+  prevX: number;
+  prevY: number;
+}
+
+/** A ball that entered a sensor this step. */
+export interface Capture {
+  readonly ball: Ball;
+  readonly sensorId: string;
 }
 
 export interface Bounds {
@@ -74,8 +87,15 @@ export interface WorldOptions {
   readonly circles?: readonly CircleShape[];
   /** Rails, as straight pieces. Ball centres stay at least BALL_RADIUS_M away from each. */
   readonly segments?: readonly SegmentShape[];
+  /** Pockets. A ball whose centre enters one is captured and removed. */
+  readonly sensors?: readonly SensorShape[];
   /** A ball whose centre leaves this box is removed. Unbounded if omitted. */
   readonly bounds?: Bounds;
+  /**
+   * Index nails and rails in a spatial hash (default true). Results are
+   * identical either way; false tests every shape, for checking exactly that.
+   */
+  readonly broadphase?: boolean;
 }
 
 export interface World {
@@ -87,7 +107,12 @@ export interface World {
   readonly balls: Ball[];
   readonly circles: readonly CircleShape[];
   readonly segments: readonly SegmentShape[];
+  readonly sensors: readonly SensorShape[];
   readonly bounds: Bounds | null;
+  /** Balls captured by sensors during the latest step, in ball order. Replaced every step. */
+  captures: readonly Capture[];
+  /** Spatial hash over circles and segments, or null to test every shape. */
+  readonly grid: StaticGrid | null;
   /** Id the next added ball will get. Ids are never reused. */
   nextBallId: number;
 }
@@ -100,13 +125,21 @@ export function createWorld(options: WorldOptions = {}): World {
       throw new RangeError('world bounds must be finite with min < max');
     }
   }
+  const circles = options.circles ?? [];
+  const segments = options.segments ?? [];
   return {
     timeS: 0,
     steps: 0,
     balls: [],
-    circles: options.circles ?? [],
-    segments: options.segments ?? [],
+    circles,
+    segments,
+    sensors: options.sensors ?? [],
     bounds: bounds ?? null,
+    captures: NO_CAPTURES,
+    grid:
+      options.broadphase === false
+        ? null
+        : createStaticGrid(circles, segments, BALL_RADIUS_M + GRID_REACH_SLOP_M),
     nextBallId: 1,
   };
 }
@@ -126,6 +159,8 @@ export function addBall(
     y: state.y,
     vx: state.vx ?? 0,
     vy: state.vy ?? 0,
+    prevX: state.x,
+    prevY: state.y,
   };
   if (![ball.x, ball.y, ball.vx, ball.vy].every(Number.isFinite)) {
     throw new RangeError('ball position and velocity must be finite');
@@ -159,21 +194,40 @@ function overlappingShape(world: World, x: number, y: number): string | null {
 }
 
 const NO_BALLS: readonly Ball[] = Object.freeze([]);
+const NO_CAPTURES: readonly Capture[] = Object.freeze([]);
+/**
+ * Extra reach when indexing shapes, well beyond CONTACT_SLOP_M: a shape is
+ * listed in every cell from which a ball could touch it, with room to spare.
+ */
+const GRID_REACH_SLOP_M = 1e-6;
 const hit = createHit();
 const best = createHit();
+const candidates: Candidates = { circles: [], segments: [] };
+/** 0, 1, 2, …: every shape, for a world without a grid. Grown on demand. */
+const allIndices: number[] = [];
+
+function everyIndex(n: number): readonly number[] {
+  while (allIndices.length < n) allIndices.push(allIndices.length);
+  return allIndices.length === n ? allIndices : allIndices.slice(0, n);
+}
 
 /**
  * Advance the world by exactly one fixed step. Returns the balls removed this
- * step for leaving the bounds (a shared empty array when there are none).
+ * step, captured by a sensor or out of bounds (a shared empty array when there
+ * are none). `world.captures` says which sensor took each captured one.
  */
 export function stepWorld(world: World): readonly Ball[] {
   let removed: Ball[] | null = null;
+  let captures: Capture[] | null = null;
   const { balls, bounds } = world;
 
   for (let i = 0; i < balls.length; i++) {
     const ball = balls[i] as Ball;
-    stepBall(world, ball);
-    if (
+    const sensor = stepBall(world, ball);
+    if (sensor) {
+      (captures ??= []).push({ ball, sensorId: sensor.id });
+      (removed ??= []).push(ball);
+    } else if (
       bounds &&
       (ball.x < bounds.minX || ball.x > bounds.maxX || ball.y < bounds.minY || ball.y > bounds.maxY)
     ) {
@@ -184,15 +238,19 @@ export function stepWorld(world: World): readonly Ball[] {
     for (const ball of removed) removeBall(world, ball.id);
   }
 
+  world.captures = captures ?? NO_CAPTURES;
   world.steps += 1;
   // Derive time from the step count so it never accumulates float error.
   world.timeS = world.steps * SIM_STEP_S;
   return removed ?? NO_BALLS;
 }
 
-function stepBall(world: World, ball: Ball): void {
+/** Returns the sensor that captured the ball this step, if any. */
+function stepBall(world: World, ball: Ball): SensorShape | null {
   const x0 = ball.x;
   const y0 = ball.y;
+  ball.prevX = x0;
+  ball.prevY = y0;
   const energy0 = specificEnergy(ball);
 
   // Semi-implicit Euler: velocity first, then position with the new velocity.
@@ -208,7 +266,14 @@ function stepBall(world: World, ball: Ball): void {
     let material: Material | null = null;
     best.t = Infinity;
 
-    for (const c of world.circles) {
+    if (world.grid) {
+      queryGrid(world.grid, ball.x, ball.y, ball.x + dx, ball.y + dy, candidates);
+    } else {
+      candidates.circles = everyIndex(world.circles.length);
+      candidates.segments = everyIndex(world.segments.length);
+    }
+    for (const ci of candidates.circles) {
+      const c = world.circles[ci] as CircleShape;
       if (sweepDisc(ball.x, ball.y, dx, dy, c.x, c.y, BALL_RADIUS_M + c.radiusM, hit)) {
         if (hit.t < best.t) {
           best.t = hit.t;
@@ -218,7 +283,8 @@ function stepBall(world: World, ball: Ball): void {
         }
       }
     }
-    for (const s of world.segments) {
+    for (const si of candidates.segments) {
+      const s = world.segments[si] as SegmentShape;
       if (sweepCapsule(ball.x, ball.y, dx, dy, s, BALL_RADIUS_M, hit)) {
         if (hit.t < best.t) {
           best.t = hit.t;
@@ -227,6 +293,23 @@ function stepBall(world: World, ball: Ball): void {
           material = s.material;
         }
       }
+    }
+
+    // A pocket entered before the next impact (or, with no impact, within
+    // the move) takes the ball where its centre crossed in.
+    let sensor: SensorShape | null = null;
+    let sensorT = material ? best.t : 1;
+    for (const p of world.sensors) {
+      const t = sensorEntryT(p, ball.x, ball.y, dx, dy);
+      if (t <= sensorT && (!sensor || t < sensorT)) {
+        sensor = p;
+        sensorT = t;
+      }
+    }
+    if (sensor) {
+      ball.x += dx * sensorT;
+      ball.y += dy * sensorT;
+      return sensor;
     }
 
     if (!material) {
@@ -249,6 +332,7 @@ function stepBall(world: World, ball: Ball): void {
     ball.vy = 0;
   }
   if (touched) dissipateContactError(ball, x0, y0, energy0);
+  return null;
 }
 
 /** Kinetic plus potential energy per unit mass, in J/kg. */

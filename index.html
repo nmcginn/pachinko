@@ -10,6 +10,21 @@
   <body>
     <canvas id="board" aria-label="Pachinko board"></canvas>
     <pre id="debug" aria-hidden="true"></pre>
+    <div id="hud">
+      <div id="balls" data-balls="">Balls –</div>
+    </div>
+    <div
+      id="handle"
+      role="slider"
+      aria-label="Launch handle: press and turn to fire, or hold space and use the arrow keys"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      aria-valuenow="50"
+      tabindex="0"
+    >
+      <div id="handle-knob"><div class="handle-mark"></div></div>
+      <span id="handle-power">50%</span>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -1,14 +1,21 @@
-// Boot: size the canvas, start the fixed-step loop, pause it while hidden.
+// Boot: load the board, size the canvas, wire the launch handle, and run the
+// fixed-step loop, paused while the tab is hidden.
 
 import '@fontsource/jost/400.css';
 import '@fontsource/jost/500.css';
 import './style.css';
 
+import classicBoard from '../boards/classic.json';
+import { createTable, stepTable } from './game/table';
+import { bindDial, bindKeyboard, createHolds } from './input/launcher';
 import { bindVisibility, createClock, createLoop } from './loop';
+import { drawBalls } from './render/balls';
+import { drawBoard } from './render/board';
 import { attachCanvas } from './render/canvas';
 import { createDebugOverlay } from './render/debug';
-import { drawBoard } from './render/board';
-import { SIM_STEP_S, createWorld, stepWorld } from './sim/world';
+import { createHud } from './render/hud';
+import { parseBoard } from './sim/board';
+import { SIM_STEP_S } from './sim/world';
 
 /**
  * Longest frame we simulate. A slower frame (a long GC pause, a debugger
@@ -24,7 +31,17 @@ function byId<T extends HTMLElement>(id: string, type: new () => T): T {
 
 const view = attachCanvas(byId('board', HTMLCanvasElement));
 const overlay = createDebugOverlay(byId('debug', HTMLElement));
-const world = createWorld();
+const hud = createHud({
+  balls: byId('balls', HTMLElement),
+  handle: byId('handle', HTMLElement),
+  knob: byId('handle-knob', HTMLElement),
+  power: byId('handle-power', HTMLElement),
+});
+const table = createTable(parseBoard(classicBoard));
+
+const holds = createHolds(table.fire);
+bindKeyboard(window, table.fire, holds);
+bindDial(byId('handle', HTMLElement), table.fire, holds);
 
 const loop = createLoop(
   {
@@ -33,10 +50,12 @@ const loop = createLoop(
   },
   createClock(SIM_STEP_S, MAX_FRAME_S),
   {
-    step: () => stepWorld(world),
+    step: () => stepTable(table),
     render: (frame) => {
-      drawBoard(view);
-      overlay.update(frame, world);
+      const bv = drawBoard(view, table.board);
+      drawBalls(view, bv, table.world.balls, frame.alpha);
+      hud.update(table.economy, table.fire, table.world.balls.length);
+      overlay.update(frame, table.world);
     },
   },
 );

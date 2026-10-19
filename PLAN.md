@@ -10,12 +10,13 @@ Stack: Vite + TypeScript (strict), Canvas 2D, Vitest for unit tests, Playwright 
 
 Agents: update this section at the end of every session.
 
-- Current milestone: M1 (every criterion implemented and passing locally; it's done once CI is green on the M1 PR and that PR is merged, then advance to M2). M0 landed on master as 1954b62.
-- Done in this milestone: `vec`, `rng` (xoshiro128\*\* checked against the reference C output), `collide` (swept ball–nail and ball–rail with impulse response), `world` (fixed step, ball lifecycle, bounds removal, energy); all four invariant tests; the 10×10 grid acceptance scene (`tests/sim/invariants.test.ts`, scenes in `tests/sim/scenes.ts`). Constants and derivations in PHYSICS.md.
-- Next up: M2 board and launcher. Start with the board schema and validator in `src/sim/board.ts` producing `createCircle`/`createPolyline` shapes for `createWorld`; pockets are sensor regions the world doesn't have yet. `MAX_LAUNCH_SPEED_MPS` (5 m/s) is provisional until a ball is launched up the real guide rail. Nothing draws balls yet; `render/balls.ts` should interpolate, which needs the world to keep previous positions.
-- Heads-up for M3: the step runs about 310k ball-steps/s brute force over 110 shapes. 100k balls at a few seconds of flight each is around 5×10⁸ ball-steps, so the 60 s budget needs the broadphase (`src/sim/broadphase.ts`, still a stub) and probably more. Measure before tuning anything.
-- Last session: 2026-10-19: M1 physics core: vec, rng, swept collisions, world step, invariant tests, grid acceptance scene.
+- Current milestone: M2 (every criterion implemented and passing locally; it's done once CI is green on the M2 PR and that PR is merged, then advance to M3). M1 landed on master as 05d09aa.
+- Done in this milestone: board schema and validator (`src/sim/board.ts`, reports every problem with its path); pockets as sensor regions in the world (`src/sim/sensor.ts`, swept along the ball's path); `boards/classic.json` (outer guide rail, launch lane, return bumper, nail field, start pocket, out-hole, foul pocket), generated once by `tools/gen-classic-board.ts`; launch speed range (3.2 m/s at power 0, MAX_LAUNCH_SPEED_MPS confirmed at 5 m/s); tray and 100/min auto-fire (`src/game/economy.ts`, `fire.ts`, `table.ts`); dial and keyboard input; HUD ball counter; board and interpolated ball rendering. Also the static-geometry broadphase (`src/sim/broadphase.ts`), pulled forward from M3 because brute force over the real board was too slow for the browser. Acceptance tests: `tests/sim/classic.test.ts` and `tests/e2e/play.spec.ts`.
+- Next up: M3. The Monte Carlo runner and start-pocket payout. Three things to know first. (1) Every shot at the same power follows the identical path (the sim is deterministic and nothing varies between launches), so a Monte Carlo needs a seeded source of variation, most likely small launch-speed jitter through `sim/rng.ts`. That is a physics-model choice: document it in PHYSICS.md. (2) The classic board has not been tuned at all: in a sweep of 101 powers, one ball entered the start pocket, and only powers below about 0.15 land in the middle of the field (PHYSICS.md, "Launch speed range"). (3) See the speed note below.
+- Heads-up for M3: with the broadphase the classic board runs about 274k ball-steps/s on the dev container. 100k balls at 1 to 2 s of flight each is around 3×10⁸ ball-steps, roughly 20 minutes single-threaded, so the 60 s budget still needs about 20× more. Worker threads over seed-split batches are the obvious lever; measure the step itself first.
+- Last session: 2026-10-19: M2 board and launcher: board schema and validator, pocket sensors, classic board, broadphase, auto-fire, dial and keyboard handle, HUD ball counter, board rendering.
 - Open questions for the maintainer: —
+- Resolved: **What does a foul ball pay?** (2026-10-19) The maintainer decided it goes back to the tray, as on real machines. Now in "Game rules (v1)" and implemented in `src/game/economy.ts`.
 
 ---
 
@@ -97,6 +98,7 @@ Simplified Japanese pachinko ("deji-pachi" style), playable without knowing the 
 
 - Start with 250 balls (the classic ¥1000 rental).
 - Out-hole at the bottom: ball is lost.
+- Foul: a shot too weak to leave the launch lane rolls back into the foul pocket at the bottom of the lane, and the ball goes back to the tray, as on real machines. It is not lost and pays nothing extra.
 - **Start pocket (ヘソ):** pays 3 balls and triggers a reel spin. Up to 4 pending spins are held (保留) and shown as indicators. Extra entries beyond 4 pay out but don't add spins.
 - **Reel:** 3-digit display. Jackpot when all three match. Probability is configurable; default 1/99 so a session actually sees one. The reel result is decided by the lottery at entry time; the animation is presentation.
 - **Jackpot:** attacker gate opens for 10 rounds. Each round closes after 10 balls enter or 30 s, whichever comes first. Each ball entering pays 15.
