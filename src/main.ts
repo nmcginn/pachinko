@@ -37,7 +37,19 @@ const hud = createHud({
   knob: byId('handle-knob', HTMLElement),
   power: byId('handle-power', HTMLElement),
 });
-const table = createTable(parseBoard(classicBoard));
+/**
+ * Seed for the launch spread: `?seed=N` pins it (for tests and bug reports),
+ * otherwise each page load gets a fresh one. Frame timing still varies, so
+ * a pinned seed gives the same shot speeds, not necessarily the same game.
+ */
+function pickSeed(): number {
+  const raw = new URLSearchParams(location.search).get('seed');
+  const n = raw === null ? NaN : Number(raw);
+  if (Number.isInteger(n) && n >= 0 && n < 2 ** 32) return n;
+  return crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+}
+
+const table = createTable(parseBoard(classicBoard), { seed: pickSeed() });
 
 const holds = createHolds(table.fire);
 bindKeyboard(window, table.fire, holds);

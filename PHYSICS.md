@@ -27,6 +27,7 @@ Board plane, metres. x to the right, y up; gravity pulls toward -y. `render/` fl
 | Max friction loss          | 2/7 of tangential speed | `MAX_FRICTION_LOSS`    | Solid sphere spinning up to rolling. See "Friction".                           |
 | Max launch speed           | 5 m/s                   | `MAX_LAUNCH_SPEED_MPS` | Confirmed on `boards/classic.json` in M2. See "Max launch speed".              |
 | Min launch speed (classic) | 3.2 m/s                 | `boards/classic.json`  | Power 0. Fouls start below about 3.0 m/s. See "Launch speed range".            |
+| Launch spread              | 1% (one s.d.)           | `LAUNCH_SPEED_SPREAD`  | Assumption, M3. Results insensitive from 0.2% to 2%. See "Launch spread".      |
 | Auto-fire interval         | 0.6 s (1200 steps)      | `FIRE_INTERVAL_STEPS`  | PLAN.md: 100 balls/min. Game timing, counted in sim steps.                     |
 | Broadphase cell            | 20 mm                   | `GRID_CELL_M`          | Numerical. Changes speed only, never results. See "Broadphase".                |
 | Contact slop               | 1 nm                    | `CONTACT_SLOP_M`       | Numerical, not physical: floating-point error after placing a ball at contact. |
@@ -53,6 +54,22 @@ The handle maps power linearly from the board's `launcher.minSpeedMps` (power 0)
 On the classic board a shot needs about 3.0 m/s to get past the end of the inner rail; slower ones roll back down the lane into the foul pocket. Measured by sweeping the launch speed: 2.9 m/s fouls, 3.0 m/s reaches the field. Power 0 is set at 3.2 m/s, about 7% clear, so no handle setting fouls (tested: 5% below power 0 still clears). Real handles do have a weak range that fouls. A foul goes back to the tray (PLAN.md game rules), so a weak range would cost the player nothing; it was left out because it would only be dead travel on the handle.
 
 Where shots land, at the M2 geometry: power 0 to about 0.1 peels off the outer rail near the top and drops into the top of the field, first touching a nail between x = 0.29 m (power 0, just right of the 0.25 m centre line) and 0.39 m (power 0.1). The ball holds to the curved rail while v²/R > g·sin φ, so the peel-off point moves right with speed. From about 0.15 up, the ball stays on the rail to the return bumper and drops into the field's right side. Nothing lands left of centre. That narrow band is how the speeds work out, not a choice; it is the first thing M3 will look at when tuning for 18–24 spins per ¥1000.
+
+### Launch spread (M3)
+
+Without variation, every shot at one power follows exactly the same path: the sim is deterministic, and nothing differs between launches. Real shots differ. The hammer spring never strikes twice alike, and balls vary slightly in mass and wear. So each launch multiplies the nominal speed by 1 + 0.01·z, with z drawn from `rng.normal()`, capped at `MAX_LAUNCH_SPEED_MPS`. The game draws from its table's seeded rng; the Monte Carlo gives every ball its own stream (see "Monte Carlo method").
+
+The 1% is an assumption, not a measurement. It barely matters: the nail field is chaotic, so any spread large enough to decorrelate paths gives the same rates. Measured on the M2 board at power 0, 1000 balls each with a uniform spread: ±0.2% gave 9.25 spins per ¥1000, ±0.5% 10.25, ±2% 8.5, all within the ±1.5 statistical error of each other. Angle spread is not modelled; the lane fixes the direction.
+
+`rng.normal()` is the sum of 12 uniforms minus 6: mean 0, variance 1, within 0.2% of a true normal inside ±3σ, and hard-bounded at ±6σ, so no shot is ever more than 6% off. It is built from additions only, so it is bit-for-bit the same on every JavaScript engine; Box–Muller would need `Math.log` and `Math.cos`, whose last bits are not specified. At power 1 the cap holds about half of all shots to exactly 5 m/s, so full power is slightly less varied than other powers. That only affects shots that overshoot the field anyway.
+
+### Monte Carlo method (M3)
+
+`src/game/montecarlo.ts` launches balls one at a time and steps each alone until a pocket takes it. With no ball–ball collisions (M5), balls in flight never interact, so this gives exactly the outcome every ball would have if fired at the auto-fire rate, and far faster. Ball i draws its launch spread from `createRng(streamSeed(seed, i))`, so its outcome depends only on the run's seed and its index. `tools/montecarlo.ts` splits a run into batches of 1000 across worker threads and sums the integer tallies, so the result is identical for any worker count (tested). Once M5 lands, balls in flight do interact, and the runner will have to fire at the auto-fire rate into a shared world instead.
+
+A ball still in play after 30 s of sim time is counted stuck and removed. No real flight takes more than about 5 s. Stuck balls are a board defect to fix, and the CI run fails if there are any.
+
+Speed: about 3.4 k sim steps per ball on the classic board at power 0 (1.7 s of flight), and 3–5 M ball-steps per second per thread on the dev container. 100k balls at power 0 take about 18 s on 4 workers.
 
 ### Rails as polylines
 
@@ -122,7 +139,8 @@ The ball rolls on the backboard under the normal component of gravity, g·sin 3�
 - A ball is never placed inside geometry: `addBall` refuses it, since nothing ever pushes a ball out of a shape.
 - Collision response treats nails and rails as fixed (infinite mass). Nails don't flex.
 - A launched ball appears at the bottom of the lane already at launch speed. The hammer stroke isn't modelled.
-- No ball–ball collisions until M5. Two balls in the lane at once pass through each other.
+- No ball–ball collisions until M5. Two balls in the lane at once pass through each other. The Monte Carlo runner relies on this (see "Monte Carlo method").
+- Launch speed varies by 1% from shot to shot; launch direction does not vary (see "Launch spread").
 
 ## Tuning log
 
@@ -135,3 +153,36 @@ First values for every constant in the table above, set with M1. Not a change, s
 ### 2026-10-19: classic board and launch range (M2)
 
 New, not changed: `boards/classic.json` (generated once by `tools/gen-classic-board.ts`, which documents the design parameters) and its `launcher.minSpeedMps` of 3.2 m/s. `MAX_LAUNCH_SPEED_MPS` was checked against the board and stays at 5 m/s. No physics constant changed. No Monte Carlo numbers yet: the tool arrives in M3, which tunes from here.
+
+### 2026-10-19: launch spread and M3 tuning of the start pocket's nails (M3)
+
+New constant, not a change: `LAUNCH_SPEED_SPREAD` = 1% (see "Launch spread"). The "before" numbers below already include it; without it, a Monte Carlo would just repeat one path.
+
+Six nails in `boards/classic.json` changed. No physics constant changed, the start pocket (cup, sensor, and the 12.5 mm gap between the two ヘソ nails) is untouched, and no other geometry moved.
+
+| Nail                          | Before                         | After                            | Why                                                                                                                     |
+| ----------------------------- | ------------------------------ | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 寄り釘 (guide nails), added   | none                           | (0.2305, 0.186), (0.2695, 0.186) | Turn balls falling beside the ヘソ in toward its gap.                                                                   |
+| Row y = 0.198 beside the ヘソ | (0.236, 0.198), (0.264, 0.198) | (0.2265, 0.2), (0.2735, 0.2)     | Moved out 9.5 mm and up 2 mm to keep a ball's width clear of the new guide nails.                                       |
+| Row y = 0.122 under the cup   | (0.236, 0.122), (0.264, 0.122) | (0.235, 0.122), (0.265, 0.122)   | Moved out 1 mm. A ball sliding down the cup's outer wall landed dead centre on them and balanced there forever (below). |
+
+Why there. On the M2 board the start pocket caught 3% of balls at its best power (7.85 spins per ¥1000, against the 18–24 target). Widening the ヘソ gap alone was weak: 15.5 mm, 3 mm wider, only reached about 12. The limit was supply, not the gap: balls came down beside the ヘソ through the open area around it and fell past. Real boards put 寄り釘 there, so that is what this adds: one on each side, just outside and above each ヘソ nail. Tight funnels (nails closer than a ball's width) reached the target too, but wedged balls between nails by the hundred, so every gap here is at least 12.5 mm: nothing new can trap a ball. The guide nails' position is sensitive, as on real machines: at the same height, x = 0.230 gives 19.7 spins, 0.2305 gives 21.4, and 0.231 gives 22.6 (24k balls each at power 0, about ±0.45). 0.2305 sits mid-range.
+
+The stuck ball. The M2 board kept about 1 ball in 10 000 in play forever. A ball sliding down the outside of a start-cup wall (vertical, so vx is exactly 0) fell straight onto the nail below, whose centre was exactly one ball radius out from the wall, at x = 0.264. It landed exactly on the crest and stayed balanced, an equilibrium only exact arithmetic can hold. Moving those nails 1 mm puts the landing 1 mm off the crest, so the ball rolls off. The sim is not at fault, but the same coincidence could recur under any vertical rail; the CI Monte Carlo run fails on any stuck ball, so it would show.
+
+Monte Carlo, `--balls 10000 --sweep 0:1:0.05 --seed 1`, spins per ¥1000:
+
+| Power                      | Before (M2) | After  |
+| -------------------------- | ----------- | ------ |
+| 0                          | 7.85        | 21.60  |
+| 0.05                       | 7.83        | 18.85  |
+| 0.10                       | 3.82        | 8.70   |
+| 0.20                       | 2.73        | 5.80   |
+| 0.50                       | 1.88        | 3.80   |
+| 0.62                       | 1.12 ¹      | 2.33 ¹ |
+| 1                          | 0.33        | 0.78   |
+| stuck balls, all 21 powers | 9           | 0      |
+
+¹ From `--balls 100000 --power 0.62 --seed 1`.
+
+At the best power, `--board classic --balls 100000 --power 0 --seed 1`: 21.28 ± 0.22 spins per ¥1000 (8.51% start, 91.49% out, no fouls, none stuck). Before (M2 geometry, same command): 7.85 ± 0.44 at 10k balls. The best power is 0, the bottom of the handle; see "Launch speed range" for why only the weakest shots play the middle of the field, and PLAN.md's open questions.

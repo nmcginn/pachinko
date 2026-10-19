@@ -40,3 +40,44 @@ jobs:
           name: playwright-report
           path: playwright-report
           retention-days: 7
+
+  montecarlo:
+    # M3 acceptance on boards/classic.json: 100k balls in under 60 s, inside
+    # the 18–24 spins per ¥1000 target at the board's best power, and
+    # identical across two runs with the same seed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Best power on the classic board, from the sweep below (PHYSICS.md, "M3 tuning").
+      BEST_POWER: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: 100k balls at the best power, twice
+        run: |
+          for i in 1 2; do
+            SECONDS=0
+            npx tsx tools/montecarlo.ts --board classic --balls 100000 --power "$BEST_POWER" --seed 1 --json > "mc$i.json"
+            echo "run $i: ${SECONDS} s"
+            test "$SECONDS" -lt 60
+          done
+          cmp mc1.json mc2.json
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync("mc1.json", "utf8"));
+            console.log(r);
+            const ok = r.spinsPer1000Yen >= 18 && r.spinsPer1000Yen <= 24 && r.stuck === 0 && r.lost === 0;
+            process.exit(ok ? 0 : 1);
+          '
+      - name: Power sweep, to confirm the best power
+        run: |
+          npx tsx tools/montecarlo.ts --board classic --balls 10000 --sweep 0:1:0.05 --seed 1 --json > sweep.json
+          node -e '
+            const s = JSON.parse(require("fs").readFileSync("sweep.json", "utf8"));
+            for (const r of s.rows) console.log(r.power.toFixed(2), r.spinsPer1000Yen.toFixed(2));
+            console.log(`best power: ${s.best}`);
+            process.exit(s.best === Number(process.env.BEST_POWER) ? 0 : 1);
+          '

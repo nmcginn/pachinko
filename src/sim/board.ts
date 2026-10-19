@@ -19,11 +19,13 @@
 // loudly at load time rather than as a ball doing something odd.
 
 import { createCircle, createPolyline } from './collide';
+import type { Rng } from './rng';
 import { createSensor, polygonProblem, sensorContains } from './sensor';
 import type { Vec2 } from './vec';
 import {
   type Ball,
   type World,
+  LAUNCH_SPEED_SPREAD,
   MAX_LAUNCH_SPEED_MPS,
   NAIL_MATERIAL,
   NAIL_RADIUS_M,
@@ -345,10 +347,16 @@ export function launchSpeedMps(launcher: Launcher, power: number): number {
   return launcher.minSpeedMps + p * (MAX_LAUNCH_SPEED_MPS - launcher.minSpeedMps);
 }
 
-/** Put a new ball at the bottom of the launch lane, moving up it at the speed for this power. */
-export function launchBall(world: World, board: Board, power: number): Ball {
+/**
+ * Put a new ball at the bottom of the launch lane, moving up it at the speed
+ * for this power. With an rng, the speed varies shot to shot by
+ * LAUNCH_SPEED_SPREAD (one draw from `rng.normal()`), capped at
+ * MAX_LAUNCH_SPEED_MPS. Without one, the shot is exactly nominal.
+ */
+export function launchBall(world: World, board: Board, power: number, rng?: Rng): Ball {
   const { launcher } = board;
-  const speed = launchSpeedMps(launcher, power);
+  let speed = launchSpeedMps(launcher, power);
+  if (rng) speed = Math.min(MAX_LAUNCH_SPEED_MPS, speed * (1 + LAUNCH_SPEED_SPREAD * rng.normal()));
   return addBall(world, {
     x: launcher.x,
     y: launcher.y,

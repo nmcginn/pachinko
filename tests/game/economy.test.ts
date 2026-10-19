@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  START_POCKET_PAYOUT,
   STARTING_BALLS,
   createEconomy,
   recordEntry,
@@ -13,6 +14,7 @@ describe('economy', () => {
       balls: 250,
       launched: 0,
       entries: { start: 0, out: 0, foul: 0 },
+      paidOut: 0,
     });
   });
 
@@ -32,13 +34,30 @@ describe('economy', () => {
     expect(none.launched).toBe(0);
   });
 
-  it('tallies pocket entries without paying for out or start yet', () => {
+  it('tallies pocket entries; the out-hole pays nothing', () => {
     const e = createEconomy(10);
     recordEntry(e, 'out');
     recordEntry(e, 'out');
+    expect(e.entries).toEqual({ start: 0, out: 2, foul: 0 });
+    expect(e).toMatchObject({ balls: 10, paidOut: 0 });
+  });
+
+  it('pays 3 balls into the tray for each start-pocket entry', () => {
+    expect(START_POCKET_PAYOUT).toBe(3);
+    const e = createEconomy(1);
+    takeBallForLaunch(e);
     recordEntry(e, 'start');
-    expect(e.entries).toEqual({ start: 1, out: 2, foul: 0 });
-    expect(e.balls).toBe(10);
+    expect(e).toMatchObject({ balls: 3, launched: 1, paidOut: 3, entries: { start: 1 } });
+    recordEntry(e, 'start');
+    expect(e).toMatchObject({ balls: 6, paidOut: 6, entries: { start: 2 } });
+  });
+
+  it('pays out into an empty tray, and the paid balls can be launched', () => {
+    const e = createEconomy(0);
+    expect(takeBallForLaunch(e)).toBe(false);
+    recordEntry(e, 'start');
+    for (let i = 0; i < START_POCKET_PAYOUT; i++) expect(takeBallForLaunch(e)).toBe(true);
+    expect(takeBallForLaunch(e)).toBe(false);
   });
 
   it('puts a foul ball back in the tray', () => {
@@ -46,7 +65,13 @@ describe('economy', () => {
     takeBallForLaunch(e);
     expect(e.balls).toBe(0);
     recordEntry(e, 'foul');
-    expect(e).toMatchObject({ balls: 1, launched: 1, entries: { start: 0, out: 0, foul: 1 } });
+    // Back to the tray, but not a payout.
+    expect(e).toMatchObject({
+      balls: 1,
+      launched: 1,
+      paidOut: 0,
+      entries: { start: 0, out: 0, foul: 1 },
+    });
     // The returned ball can be launched again.
     expect(takeBallForLaunch(e)).toBe(true);
   });

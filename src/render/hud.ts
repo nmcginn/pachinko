@@ -25,6 +25,8 @@ export function createHud(els: HudElements): Hud {
   let shownPower = NaN;
   let shownHeld: boolean | null = null;
   let shownInPlay = NaN;
+  let shownStarts = NaN;
+  let shownLaunched = NaN;
 
   return {
     update(economy, fire, inPlay) {
@@ -32,6 +34,14 @@ export function createHud(els: HudElements): Hud {
         shownBalls = economy.balls;
         els.balls.textContent = `Balls ${economy.balls}`;
         els.balls.dataset['balls'] = String(economy.balls);
+      }
+      if (economy.entries.start !== shownStarts) {
+        shownStarts = economy.entries.start;
+        els.balls.dataset['starts'] = String(economy.entries.start);
+      }
+      if (economy.launched !== shownLaunched) {
+        shownLaunched = economy.launched;
+        els.balls.dataset['launched'] = String(economy.launched);
       }
       if (inPlay !== shownInPlay) {
         shownInPlay = inPlay;

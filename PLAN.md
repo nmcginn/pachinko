@@ -10,12 +10,12 @@ Stack: Vite + TypeScript (strict), Canvas 2D, Vitest for unit tests, Playwright 
 
 Agents: update this section at the end of every session.
 
-- Current milestone: M2 (every criterion implemented and passing locally; it's done once CI is green on the M2 PR and that PR is merged, then advance to M3). M1 landed on master as 05d09aa.
-- Done in this milestone: board schema and validator (`src/sim/board.ts`, reports every problem with its path); pockets as sensor regions in the world (`src/sim/sensor.ts`, swept along the ball's path); `boards/classic.json` (outer guide rail, launch lane, return bumper, nail field, start pocket, out-hole, foul pocket), generated once by `tools/gen-classic-board.ts`; launch speed range (3.2 m/s at power 0, MAX_LAUNCH_SPEED_MPS confirmed at 5 m/s); tray and 100/min auto-fire (`src/game/economy.ts`, `fire.ts`, `table.ts`); dial and keyboard input; HUD ball counter; board and interpolated ball rendering. Also the static-geometry broadphase (`src/sim/broadphase.ts`), pulled forward from M3 because brute force over the real board was too slow for the browser. Acceptance tests: `tests/sim/classic.test.ts` and `tests/e2e/play.spec.ts`.
-- Next up: M3. The Monte Carlo runner and start-pocket payout. Three things to know first. (1) Every shot at the same power follows the identical path (the sim is deterministic and nothing varies between launches), so a Monte Carlo needs a seeded source of variation, most likely small launch-speed jitter through `sim/rng.ts`. That is a physics-model choice: document it in PHYSICS.md. (2) The classic board has not been tuned at all: in a sweep of 101 powers, one ball entered the start pocket, and only powers below about 0.15 land in the middle of the field (PHYSICS.md, "Launch speed range"). (3) See the speed note below.
-- Heads-up for M3: with the broadphase the classic board runs about 274k ball-steps/s on the dev container. 100k balls at 1 to 2 s of flight each is around 3×10⁸ ball-steps, roughly 20 minutes single-threaded, so the 60 s budget still needs about 20× more. Worker threads over seed-split batches are the obvious lever; measure the step itself first.
-- Last session: 2026-10-19: M2 board and launcher: board schema and validator, pocket sensors, classic board, broadphase, auto-fire, dial and keyboard handle, HUD ball counter, board rendering.
-- Open questions for the maintainer: —
+- Current milestone: M3 (every criterion implemented and passing locally; it's done once CI, including the new `montecarlo` job, is green on the M3 PR and that PR is merged, then advance to M4). M2 landed on master as 1810c43.
+- Done in this milestone: launch spread, 1% of launch speed per shot from `sim/rng.ts` (`LAUNCH_SPEED_SPREAD`; `rng.normal()`, `streamSeed()`), used by the game and the Monte Carlo alike; start pocket pays 3 (`src/game/economy.ts`); pure Monte Carlo core (`src/game/montecarlo.ts`, one ball at a time, each from its own rng stream); `tools/montecarlo.ts` with `--sweep`, `--json` and worker threads (results identical for any worker count); classic board tuned to 21.28 ± 0.22 spins per ¥1000 at its best power, 0 (two 寄り釘 added beside the ヘソ, four nails moved; PHYSICS.md "M3 tuning"); a `montecarlo` CI job that runs the acceptance (100k balls under 60 s, twice, byte-identical, in 18–24, no stuck balls, and a sweep confirming the best power). The tuning also fixed a ball that balanced forever on a nail crest under the start cup, about 1 in 10 000 shots.
+- Next up: M4, `game/machine.ts` (hold queue, lottery, jackpot rounds). Things to know: (1) the Monte Carlo simulates each ball alone, which is exact only while balls never interact. M5's ball–ball collisions break that, and the runner will need to fire at the auto-fire rate into a shared world (PHYSICS.md "Monte Carlo method"). (2) Speed is fine: 100k balls at power 0 take about 18 s on 4 workers here (3–5 M ball-steps/s per thread, far more than the 274k/s M2 estimated; not investigated why). (3) The browser takes `?seed=N` to pin the launch spread; e2e uses it.
+- Last session: 2026-10-19: M3 headless runner and start pocket: launch spread, Monte Carlo core and CLI with sweep and workers, start pocket pays 3, classic board tuned to 21.3 spins per ¥1000, CI acceptance job.
+- Open questions for the maintainer:
+  - **Where should the sweet spot sit on the handle?** (2026-10-19, not blocking.) The classic board's best power is 0, the bottom of the handle: only shots just strong enough to leave the lane drop into the middle of the field. From about 0.15 up, shots ride the rim to the return bumper and mostly go down the right side, so the default handle position (0.5) gets about 4 spins per ¥1000 against 21 at power 0. Options: (a) leave it; the player finds the spot. (b) Remap the handle so its range runs from a foul at the bottom to an overshoot at the top with the sweet spot mid-way, as on real machines: lower `launcher.minSpeedMps` below the foul threshold (about 3.0 m/s) and/or lower `MAX_LAUNCH_SPEED_MPS`. (c) Change the upper field (return bumper, the nail-free channel down the right rim) so mid-power shots also feed the centre. Recommendation: (b), the smallest change and the most like the real thing; it needs a re-tune afterwards, since the best power's rate would change. It is a feel decision, so this PR doesn't make it.
 - Resolved: **What does a foul ball pay?** (2026-10-19) The maintainer decided it goes back to the tray, as on real machines. Now in "Game rules (v1)" and implemented in `src/game/economy.ts`.
 
 ---
@@ -43,7 +43,8 @@ Agents: update this section at the end of every session.
 │   ├── game/               # Pure TS game rules. No DOM
 │   │   ├── machine.ts      # State machine: normal, spinning, jackpot rounds
 │   │   ├── lottery.ts      # Jackpot draw, hold queue (保留)
-│   │   └── economy.ts      # Ball counts, payouts
+│   │   ├── economy.ts      # Ball counts, payouts
+│   │   └── montecarlo.ts   # Headless batch runner, shared by tools/ and M7's Web Worker
 │   ├── render/             # Canvas drawing only. Reads sim/game state, never mutates it
 │   │   ├── canvas.ts       # Backing store sized to CSS size × devicePixelRatio
 │   │   ├── debug.ts        # Debug overlay (FPS, steps/frame); fps.ts holds the pure meter
@@ -54,7 +55,7 @@ Agents: update this section at the end of every session.
 │   ├── input/              # Launch handle (mouse, touch, keyboard)
 │   └── audio/              # WebAudio, added in M6
 ├── tools/
-│   └── montecarlo.ts       # Headless runner: drop N balls, print stats
+│   └── montecarlo.ts       # CLI over game/montecarlo.ts: worker threads, sweep, print stats
 └── tests/
     ├── sim/                # Vitest
     ├── game/               # Vitest
