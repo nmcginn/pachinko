@@ -3,8 +3,9 @@
 // JSON is the source of truth: nail-adjust mode (M7) and any tuning edit the
 // JSON directly, and rerunning this would overwrite those edits. Kept so the
 // geometry's design intent stays reviewable. M3 has since hand-tuned six
-// nails around the start pocket in the JSON (PHYSICS.md, tuning log), so
-// this no longer reproduces the board exactly.
+// nails around the start pocket in the JSON (PHYSICS.md, tuning log), and M4
+// added the attacker (its box rail, pocket, and lid) there by hand, so this
+// no longer reproduces the board exactly.
 //
 //   npx tsx tools/gen-classic-board.ts > boards/classic.json
 //

@@ -19,7 +19,15 @@ describe('tools/montecarlo.ts', { timeout: 30_000 }, () => {
   it('prints usage with --help', () => {
     const r = run('--help');
     expect(r.status).toBe(0);
-    for (const flag of ['--board', '--balls', '--power', '--sweep', '--seed', '--workers']) {
+    for (const flag of [
+      '--board',
+      '--balls',
+      '--power',
+      '--sweep',
+      '--seed',
+      '--workers',
+      '--open',
+    ]) {
       expect(r.stdout).toContain(flag);
     }
   });
@@ -41,8 +49,28 @@ describe('tools/montecarlo.ts', { timeout: 30_000 }, () => {
     expect(three).toEqual(one);
     expect(again).toEqual(one);
     expect(one).toMatchObject({ board: 'classic', seed: 5, power: 0, launched: 800 });
-    const { start, out, foul } = one.entries;
+    const { start, out, foul, attacker } = one.entries;
+    expect(attacker).toBe(0);
+    expect(one.gatesOpen).toBe(false);
     expect(start + out + foul + one.lost + one.stuck).toBe(800);
+  });
+
+  it('holds the attacker open with --open, and reports what it catches', () => {
+    const args = ['--balls', '400', '--power', '0', '--seed', '5', '--workers', '2'];
+    const shut = json(...args);
+    const open = json(...args, '--open');
+    expect(open.gatesOpen).toBe(true);
+    expect(open.entries.attacker).toBeGreaterThan(0);
+    expect(open.attackerRate).toBe(open.entries.attacker / 400);
+    // The attacker is below the start pocket: start entries can't change.
+    expect(open.entries.start).toBe(shut.entries.start);
+
+    const text = run(...args, '--open');
+    expect(text.stdout).toContain('gates open');
+    expect(text.stdout).toMatch(/attacker +\d+\.\d\d%/);
+    expect(run(...args).stdout).not.toContain('attacker');
+    const sweep = run('--balls', '100', '--sweep', '0:0.1:0.1', '--workers', '1', '--open');
+    expect(sweep.stdout).toMatch(/power +start +out +foul +attacker/);
   });
 
   it('sweeps powers into a table and marks the best', () => {

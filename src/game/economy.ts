@@ -8,6 +8,16 @@ import type { PocketKind } from '../sim/board';
 export const STARTING_BALLS = 250;
 /** Balls paid into the tray for each start-pocket (ヘソ) entry. */
 export const START_POCKET_PAYOUT = 3;
+/** Balls paid into the tray for each attacker entry, during a jackpot round or swept in as it closes. */
+export const ATTACKER_PAYOUT = 15;
+
+/** What a pocket pays into the tray. A foul's returned ball is not a payout. */
+const PAYOUT: Record<PocketKind, number> = {
+  start: START_POCKET_PAYOUT,
+  attacker: ATTACKER_PAYOUT,
+  out: 0,
+  foul: 0,
+};
 
 export interface Economy {
   /** Balls in the tray, available to launch. */
@@ -27,7 +37,7 @@ export function createEconomy(startingBalls = STARTING_BALLS): Economy {
   return {
     balls: startingBalls,
     launched: 0,
-    entries: { start: 0, out: 0, foul: 0 },
+    entries: { start: 0, out: 0, foul: 0, attacker: 0 },
     paidOut: 0,
   };
 }
@@ -41,16 +51,15 @@ export function takeBallForLaunch(economy: Economy): boolean {
 }
 
 /**
- * Record a ball ending in a pocket. The start pocket pays START_POCKET_PAYOUT
- * into the tray (its spin is M4's). A foul ball never reached the field, so
- * it goes back to the tray, as on real machines. The out-hole pays nothing.
+ * Record a ball ending in a pocket. The start pocket pays
+ * START_POCKET_PAYOUT into the tray and the attacker ATTACKER_PAYOUT (their
+ * spins and rounds are game/machine.ts's). A foul ball never reached the
+ * field, so it goes back to the tray, as on real machines. The out-hole
+ * pays nothing.
  */
 export function recordEntry(economy: Economy, kind: PocketKind): void {
   economy.entries[kind] += 1;
-  if (kind === 'start') {
-    economy.balls += START_POCKET_PAYOUT;
-    economy.paidOut += START_POCKET_PAYOUT;
-  } else if (kind === 'foul') {
-    economy.balls += 1;
-  }
+  economy.balls += PAYOUT[kind];
+  economy.paidOut += PAYOUT[kind];
+  if (kind === 'foul') economy.balls += 1;
 }

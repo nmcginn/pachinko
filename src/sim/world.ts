@@ -10,6 +10,9 @@
 //   3. capture the ball if its path entered a sensor (a pocket), stopping it
 //      at the point of entry
 //   4. remove the ball if it was captured or has left the world bounds
+// Gates (the attacker's lid) are rail segments that can be switched off:
+// an open gate's segments are skipped. Opening and closing is input, like a
+// launch; only setGateOpen does it, never the step.
 // Every constant here is derived or justified in PHYSICS.md.
 
 import {
@@ -89,6 +92,26 @@ export interface Bounds {
   readonly maxY: number;
 }
 
+/** A gate as passed to createWorld: a lid that closes over a pocket. */
+export interface GateOptions {
+  readonly id: string;
+  /** The lid. Solid while the gate is closed, absent while it is open. */
+  readonly segments: readonly SegmentShape[];
+  /** Sensor that takes a ball caught in the gate's mouth when it closes. */
+  readonly sensorId: string;
+  /** Default false: closed. */
+  readonly open?: boolean;
+}
+
+export interface Gate {
+  readonly id: string;
+  readonly sensorId: string;
+  /** Indices of the lid's segments in world.segments. */
+  readonly segments: readonly number[];
+  /** Read it; change it only through setGateOpen. */
+  readonly open: boolean;
+}
+
 export interface WorldOptions {
   /** Nails. Ball centres stay at least BALL_RADIUS_M + radius away from each. */
   readonly circles?: readonly CircleShape[];
@@ -98,6 +121,8 @@ export interface WorldOptions {
   readonly sensors?: readonly SensorShape[];
   /** A ball whose centre leaves this box is removed. Unbounded if omitted. */
   readonly bounds?: Bounds;
+  /** Gates. Their lid segments are appended to `segments`, after the rails. */
+  readonly gates?: readonly GateOptions[];
   /**
    * Index nails and rails in a spatial hash (default true). Results are
    * identical either way; false tests every shape, for checking exactly that.
@@ -116,6 +141,9 @@ export interface World {
   readonly segments: readonly SegmentShape[];
   readonly sensors: readonly SensorShape[];
   readonly bounds: Bounds | null;
+  readonly gates: readonly Gate[];
+  /** Per segment, 1 if it belongs to an open gate and is skipped. Kept by setGateOpen. */
+  readonly segmentOff: Uint8Array;
   /** Balls captured by sensors during the latest step, in ball order. Replaced every step. */
   captures: readonly Capture[];
   /** Spatial hash over circles and segments, or null to test every shape. */
@@ -133,15 +161,37 @@ export function createWorld(options: WorldOptions = {}): World {
     }
   }
   const circles = options.circles ?? [];
-  const segments = options.segments ?? [];
+  const segments = [...(options.segments ?? [])];
+  const sensors = options.sensors ?? [];
+  const gates: Gate[] = [];
+  for (const g of options.gates ?? []) {
+    if (gates.some((other) => other.id === g.id))
+      throw new RangeError(`duplicate gate id "${g.id}"`);
+    if (!sensors.some((s) => s.id === g.sensorId)) {
+      throw new RangeError(`gate "${g.id}" names sensor "${g.sensorId}", which isn't in the world`);
+    }
+    if (g.segments.length === 0) throw new RangeError(`gate "${g.id}" has no lid segments`);
+    const first = segments.length;
+    segments.push(...g.segments);
+    gates.push({
+      id: g.id,
+      sensorId: g.sensorId,
+      segments: g.segments.map((_, k) => first + k),
+      open: g.open ?? false,
+    });
+  }
+  const segmentOff = new Uint8Array(segments.length);
+  for (const g of gates) if (g.open) for (const i of g.segments) segmentOff[i] = 1;
   return {
     timeS: 0,
     steps: 0,
     balls: [],
     circles,
     segments,
-    sensors: options.sensors ?? [],
+    sensors,
     bounds: bounds ?? null,
+    gates,
+    segmentOff,
     captures: NO_CAPTURES,
     grid:
       options.broadphase === false
@@ -187,15 +237,47 @@ export function removeBall(world: World, id: number): boolean {
   return true;
 }
 
-function overlappingShape(world: World, x: number, y: number): string | null {
-  const clearance = (r: number) => r - CONTACT_SLOP_M;
-  for (const c of world.circles) {
-    if (Math.hypot(x - c.x, y - c.y) < clearance(BALL_RADIUS_M + c.radiusM)) return 'nail';
+/**
+ * Open or close a gate. Opening just removes the lid. Closing puts it back,
+ * and a ball the lid would close on (one already in the gate's mouth,
+ * overlapping the lid) is taken by the gate's sensor, as if it had dropped
+ * in: the lid can't close through it, and nothing ever pushes a ball out of
+ * geometry. Returns those captures, in ball order; they are removed from
+ * play but not added to `world.captures`, which belongs to the step.
+ */
+export function setGateOpen(world: World, id: string, open: boolean): readonly Capture[] {
+  const gate = world.gates.find((g) => g.id === id);
+  if (!gate) throw new RangeError(`no gate "${id}"`);
+  if (gate.open === open) return NO_CAPTURES;
+  (gate as { open: boolean }).open = open;
+  for (const i of gate.segments) world.segmentOff[i] = open ? 1 : 0;
+  if (open) return NO_CAPTURES;
+  const caught: Capture[] = [];
+  for (const ball of world.balls) {
+    const onLid = gate.segments.some(
+      (i) => segmentDistanceM(world.segments[i] as SegmentShape, ball.x, ball.y) < BALL_CLEARANCE_M,
+    );
+    if (onLid) caught.push({ ball, sensorId: gate.sensorId });
   }
-  for (const s of world.segments) {
-    const along = Math.min(s.lengthM, Math.max(0, (x - s.ax) * s.ux + (y - s.ay) * s.uy));
-    const d = Math.hypot(x - (s.ax + s.ux * along), y - (s.ay + s.uy * along));
-    if (d < clearance(BALL_RADIUS_M)) return 'rail';
+  for (const c of caught) removeBall(world, c.ball.id);
+  return caught.length > 0 ? caught : NO_CAPTURES;
+}
+
+/** Closer than this to a rail, a ball centre overlaps it. */
+const BALL_CLEARANCE_M = BALL_RADIUS_M - CONTACT_SLOP_M;
+
+function segmentDistanceM(s: SegmentShape, x: number, y: number): number {
+  const along = Math.min(s.lengthM, Math.max(0, (x - s.ax) * s.ux + (y - s.ay) * s.uy));
+  return Math.hypot(x - (s.ax + s.ux * along), y - (s.ay + s.uy * along));
+}
+
+function overlappingShape(world: World, x: number, y: number): string | null {
+  for (const c of world.circles) {
+    if (Math.hypot(x - c.x, y - c.y) < BALL_CLEARANCE_M + c.radiusM) return 'nail';
+  }
+  for (let i = 0; i < world.segments.length; i++) {
+    if (world.segmentOff[i]) continue;
+    if (segmentDistanceM(world.segments[i] as SegmentShape, x, y) < BALL_CLEARANCE_M) return 'rail';
   }
   return null;
 }
@@ -213,9 +295,17 @@ const candidates: Candidates = { circles: [], segments: [] };
 /** 0, 1, 2, …: every shape, for a world without a grid. Grown on demand. */
 const allIndices: number[] = [];
 
-function everyIndex(n: number): readonly number[] {
+/**
+ * Every circle and segment as candidates. Grows the shared list to cover
+ * both before handing it out: growing it after would lengthen a list
+ * already handed out as the shorter kind's.
+ */
+function everyShape(world: World, out: Candidates): void {
+  const n = Math.max(world.circles.length, world.segments.length);
   while (allIndices.length < n) allIndices.push(allIndices.length);
-  return allIndices.length === n ? allIndices : allIndices.slice(0, n);
+  const take = (k: number) => (allIndices.length === k ? allIndices : allIndices.slice(0, k));
+  out.circles = take(world.circles.length);
+  out.segments = take(world.segments.length);
 }
 
 /**
@@ -276,9 +366,9 @@ function stepBall(world: World, ball: Ball): SensorShape | null {
     if (world.grid) {
       queryGrid(world.grid, ball.x, ball.y, ball.x + dx, ball.y + dy, candidates);
     } else {
-      candidates.circles = everyIndex(world.circles.length);
-      candidates.segments = everyIndex(world.segments.length);
+      everyShape(world, candidates);
     }
+    const { segmentOff } = world;
     for (const ci of candidates.circles) {
       const c = world.circles[ci] as CircleShape;
       if (sweepDisc(ball.x, ball.y, dx, dy, c.x, c.y, BALL_RADIUS_M + c.radiusM, hit)) {
@@ -291,6 +381,7 @@ function stepBall(world: World, ball: Ball): SensorShape | null {
       }
     }
     for (const si of candidates.segments) {
+      if (segmentOff[si]) continue;
       const s = world.segments[si] as SegmentShape;
       if (sweepCapsule(ball.x, ball.y, dx, dy, s, BALL_RADIUS_M, hit)) {
         if (hit.t < best.t) {

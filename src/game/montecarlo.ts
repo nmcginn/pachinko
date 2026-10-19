@@ -18,7 +18,7 @@ import {
   pocketKind,
 } from '../sim/board';
 import { createRng, streamSeed } from '../sim/rng';
-import { SIM_STEP_S, stepWorld } from '../sim/world';
+import { SIM_STEP_S, setGateOpen, stepWorld } from '../sim/world';
 import { STARTING_BALLS } from './economy';
 
 /**
@@ -50,12 +50,23 @@ export interface BatchOptions {
   readonly first?: number;
   /** Balls in this batch. */
   readonly count: number;
+  /**
+   * Hold every gate (the attacker) open for the whole run, to measure what
+   * it catches during a jackpot round. Default false: closed, as in normal play.
+   */
+  readonly gatesOpen?: boolean;
   /** Override MAX_FLIGHT_S, for tests. */
   readonly maxFlightS?: number;
 }
 
 export function createTally(): Tally {
-  return { launched: 0, entries: { start: 0, out: 0, foul: 0 }, lost: 0, stuck: 0, ballSteps: 0 };
+  return {
+    launched: 0,
+    entries: { start: 0, out: 0, foul: 0, attacker: 0 },
+    lost: 0,
+    stuck: 0,
+    ballSteps: 0,
+  };
 }
 
 /** Add `b` into `a`. */
@@ -64,6 +75,7 @@ export function addTally(a: Tally, b: Readonly<Tally>): Tally {
   a.entries.start += b.entries.start;
   a.entries.out += b.entries.out;
   a.entries.foul += b.entries.foul;
+  a.entries.attacker += b.entries.attacker;
   a.lost += b.lost;
   a.stuck += b.stuck;
   a.ballSteps += b.ballSteps;
@@ -85,6 +97,7 @@ export function runBatch(board: Board, options: BatchOptions): Tally {
 
   const tally = createTally();
   const world = createBoardWorld(board);
+  if (options.gatesOpen) for (const gate of world.gates) setGateOpen(world, gate.id, true);
   for (let i = first; i < first + count; i++) {
     launchBall(world, board, power, createRng(streamSeed(seed, i)));
     tally.launched += 1;
@@ -125,6 +138,8 @@ export interface Summary {
   readonly outRate: number;
   /** Fraction that fouled (and went back to the tray). */
   readonly foulRate: number;
+  /** Fraction that entered the attacker. 0 unless the run held the gates open. */
+  readonly attackerRate: number;
   /**
    * Start-pocket entries per 250 balls launched (PLAN.md's key metric).
    * Every launch counts, fouls included.
@@ -144,6 +159,7 @@ export function summarize(tally: Readonly<Tally>): Summary {
     startRate: p,
     outRate: rate(tally.entries.out),
     foulRate: rate(tally.entries.foul),
+    attackerRate: rate(tally.entries.attacker),
     spinsPer1000Yen: p * STARTING_BALLS,
     spinsPer1000YenSe: n > 0 ? Math.sqrt((p * (1 - p)) / n) * STARTING_BALLS : 0,
   };

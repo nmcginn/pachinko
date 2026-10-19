@@ -19,6 +19,18 @@ describe('fitBoard', () => {
     expect(v.ox).toBeCloseTo(16, 9);
   });
 
+  it('fits below a top band, centred in the space left', () => {
+    const v = fitBoard(1280, 800, 0.5, 0.53, 16, 84);
+    expect(v.scale).toBeCloseTo((800 - 84 - 32) / 0.53, 9);
+    // Top of the board sits just under the band, bottom at the bottom margin.
+    expect(v.oy - 0.53 * v.scale).toBeCloseTo(84 + 16, 9);
+    expect(v.oy).toBeCloseTo(800 - 16, 9);
+    // On a tall narrow canvas, width-limited: the board centres in what's below the band.
+    const p = fitBoard(390, 844, 0.5, 0.53, 16, 84);
+    expect(p.scale).toBeCloseTo(358 / 0.5, 9);
+    expect((p.oy + (p.oy - 0.53 * p.scale)) / 2).toBeCloseTo(84 + (844 - 84) / 2, 9);
+  });
+
   it('never goes negative on a canvas smaller than its margins', () => {
     expect(fitBoard(10, 10, 0.5, 0.53, 16).scale).toBe(0);
   });

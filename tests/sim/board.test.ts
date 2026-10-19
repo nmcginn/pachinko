@@ -222,10 +222,100 @@ describe('parseBoard', () => {
     ).toEqual(['rails[0].id: must be a non-empty string']);
   });
 
+  describe('attackers', () => {
+    const attacker = (extra: Record<string, unknown>) => ({
+      id: 'attacker',
+      kind: 'attacker',
+      polygon: [
+        [0.14, 0.05],
+        [0.18, 0.05],
+        [0.18, 0.03],
+        [0.14, 0.03],
+      ],
+      ...extra,
+    });
+    const lid = [
+      [0.14, 0.055],
+      [0.16, 0.06],
+      [0.18, 0.055],
+    ];
+    const withPocket = (p: unknown) =>
+      edit((b) => (b['pockets'] = [...(b['pockets'] as unknown[]), p]));
+
+    it('accept a lid, and the board world makes it a closed gate named for the pocket', () => {
+      const board = parseBoard(withPocket(attacker({ lid })));
+      expect(board.pockets[1]).toMatchObject({
+        kind: 'attacker',
+        lid: [{ x: 0.14, y: 0.055 }, {}, {}],
+      });
+      const world = createBoardWorld(board);
+      // The bowl's 2 segments, then the lid's 2.
+      expect(world.gates).toEqual([
+        { id: 'attacker', sensorId: 'attacker', segments: [2, 3], open: false },
+      ]);
+      expect(world.segments).toHaveLength(4);
+    });
+
+    it('need a lid, and nothing else may have one', () => {
+      expect(issues(withPocket(attacker({})))).toEqual([
+        'pockets[1].lid: an attacker needs a lid, the polyline that closes over its mouth',
+      ]);
+      const out = (minimal()['pockets'] as unknown[])[0] as Record<string, unknown>;
+      expect(issues(edit((b) => (b['pockets'] = [{ ...out, lid }])))).toEqual([
+        'pockets[0].lid: only attacker pockets have a lid, not "out"',
+        'pockets: needs at least one "out" pocket, or balls can never leave',
+      ]);
+    });
+
+    it('reject a lid that is not a usable polyline on the board', () => {
+      expect(issues(withPocket(attacker({ lid: [[0.14, 0.055]] })))).toEqual([
+        'pockets[1].lid: a lid needs at least 2 points, got 1',
+      ]);
+      expect(
+        issues(
+          withPocket(
+            attacker({
+              lid: [
+                [0.14, 0.055],
+                [0.14, 0.055],
+              ],
+            }),
+          ),
+        ),
+      ).toEqual(['pockets[1].lid[1]: repeats the previous point (0.14, 0.055)']);
+      expect(
+        issues(
+          withPocket(
+            attacker({
+              lid: [
+                [0.14, 0.055],
+                [0.3, 0.055],
+              ],
+            }),
+          ),
+        ),
+      ).toEqual(['pockets[1].lid[1]: (0.3, 0.055) is outside the 0.2 × 0.2 m board']);
+      expect(issues(withPocket(attacker({ lid: 'shut' })))).toEqual([
+        'pockets[1].lid: must be an array',
+      ]);
+    });
+
+    it('reject a launcher on the closed lid', () => {
+      expect(
+        issues(
+          edit((b) => {
+            b['pockets'] = [...(b['pockets'] as unknown[]), attacker({ lid })];
+            b['launcher'] = { x: 0.16, y: 0.062, angleDeg: 90, minSpeedMps: 1 };
+          }),
+        ),
+      ).toEqual(['launcher: a ball at (0.16, 0.062) would overlap a nail or rail']);
+    });
+  });
+
   it('rejects bad pockets', () => {
     const out = (minimal()['pockets'] as unknown[])[0] as Record<string, unknown>;
     expect(issues(edit((b) => (b['pockets'] = [{ ...out, kind: 'jackpot' }])))).toEqual([
-      'pockets[0].kind: must be one of start, out, foul, got jackpot',
+      'pockets[0].kind: must be one of start, out, foul, attacker, got jackpot',
       'pockets: needs at least one "out" pocket, or balls can never leave',
     ]);
     expect(
