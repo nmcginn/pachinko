@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { ATTACKER_PAYOUT, START_POCKET_PAYOUT } from '../../src/game/economy';
 import { FIRE_INTERVAL_STEPS } from '../../src/game/fire';
+import { ROUNDS, attackerOpen, forceJackpot } from '../../src/game/machine';
 import { createTable, stepTable } from '../../src/game/table';
 import { parseBoard } from '../../src/sim/board';
 import { SIM_STEP_S } from '../../src/sim/world';
@@ -119,5 +121,70 @@ describe('table', () => {
     const b = run();
     expect(b.out).toEqual(a.out);
     expect(b.economy).toEqual(a.economy);
+  });
+
+  it('plays a forced jackpot through 10 rounds, the attacker opening only for each round', () => {
+    const table = createTable(classic, { seed: 5, jackpotProbability: 0 });
+    const { machine, world, economy } = table;
+    table.fire.power = 0;
+    table.fire.held = true;
+    const gate = world.gates[0];
+    expect(gate?.id).toBe('attacker');
+    forceJackpot(machine);
+    let opened = 0;
+    let wasOpen = false;
+    const roundEnds: number[] = [];
+    for (let i = 0; i < steps(400) && !(machine.roundsPlayed === ROUNDS); i++) {
+      stepTable(table);
+      // The world's gate follows the machine on every step.
+      expect(gate?.open).toBe(attackerOpen(machine));
+      if (gate?.open && !wasOpen) opened += 1;
+      if (wasOpen && !gate?.open) roundEnds.push(world.timeS);
+      wasOpen = gate?.open ?? false;
+    }
+    expect(machine.roundsPlayed).toBe(ROUNDS);
+    expect(opened).toBe(ROUNDS);
+    expect(roundEnds).toHaveLength(ROUNDS);
+    // Over; any spins held during the rounds play now.
+    expect(machine.phase.kind).not.toBe('jackpot');
+    expect(machine.jackpots).toBe(1);
+    // Firing at the auto-fire rate, the attacker took balls, and each paid 15.
+    const { start, out, attacker } = economy.entries;
+    expect(attacker).toBeGreaterThan(ROUNDS * 5);
+    expect(economy.paidOut).toBe(START_POCKET_PAYOUT * start + ATTACKER_PAYOUT * attacker);
+    expect(economy.balls + world.balls.length).toBe(250 - start - out - attacker + economy.paidOut);
+  });
+
+  it('keeps the attacker shut outside a jackpot', () => {
+    const table = createTable(classic, { seed: 1, jackpotProbability: 0 });
+    table.fire.power = 0;
+    table.fire.held = true;
+    for (let i = 0; i < steps(60); i++) stepTable(table);
+    expect(table.economy.entries.start).toBeGreaterThan(0);
+    expect(table.economy.entries.attacker).toBe(0);
+    expect(table.world.gates[0]?.open).toBe(false);
+    expect(table.machine.spins).toBeGreaterThan(0);
+  });
+
+  it('draws the lottery from its own stream: jackpot odds never shift launch speeds', () => {
+    const run = (jackpotProbability: number) => {
+      const table = createTable(classic, { seed: 1, jackpotProbability });
+      table.fire.power = 0;
+      table.fire.held = true;
+      const speeds: number[] = [];
+      for (let i = 0; i < steps(60); i++) {
+        const before = table.world.nextBallId;
+        stepTable(table);
+        const ball = table.world.balls.find((b) => b.id === before);
+        if (ball) speeds.push(Math.hypot(ball.vx, ball.vy));
+      }
+      return { speeds, machine: table.machine };
+    };
+    const never = run(0);
+    const always = run(1);
+    expect(never.speeds).toHaveLength(100);
+    expect(always.speeds).toEqual(never.speeds);
+    expect(never.machine.jackpots).toBe(0);
+    expect(always.machine.jackpots).toBeGreaterThan(0);
   });
 });
