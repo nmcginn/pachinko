@@ -97,9 +97,10 @@ test('letting go of the dial does not cancel a held space bar', async ({ page })
 });
 
 test('M3: a start-pocket entry pays 3 balls into the tray', async ({ page }) => {
-  // Seed 8 at power 0: the 3rd shot enters the start pocket (each shot's
-  // speed comes from the seed alone, and balls don't interact until M5, so
-  // frame timing can't change which one).
+  // Seed 8 at power 0: the first shot enters the start pocket, 1.25 s after
+  // it is fired. Shots follow at fixed sim-step intervals and each one's
+  // speed comes from the seed, so frame timing can't change which one, even
+  // with balls colliding (M5).
   await page.goto('/?seed=8');
   // Well past the bottom of the range, so power clamps to exactly 0.
   for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowDown');

@@ -43,7 +43,7 @@ const counts = (page: Page) =>
 
 test.beforeEach(async ({ page }) => {
   await page.clock.install();
-  await page.goto('/?seed=8');
+  await page.goto('/?seed=58');
   await page.clock.runFor(200);
   await expect(page.locator('#balls')).toHaveAttribute('data-balls', '250');
 });
@@ -100,7 +100,9 @@ test('start-pocket entries spin the reel, and held spins light the hold lamps', 
 }) => {
   for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowDown');
   await page.keyboard.down('Space');
-  // Seed 8 at power 0: the 3rd shot enters the start pocket (tests/e2e/play.spec.ts).
+  // Seed 58 at power 0: start-pocket entries at 1.6 s and 3.7 s of sim time,
+  // the second while the first still spins. (Seed 8 did this until balls
+  // collided, M5: a collision now sends its second entry down the out-hole.)
   await expect
     .poll(async () => {
       await page.clock.runFor(250);
