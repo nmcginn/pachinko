@@ -46,6 +46,20 @@ describe('table', () => {
     expect(foul).toBe(0);
   });
 
+  it('returns foul balls to the tray', () => {
+    // The classic board with its power-0 speed lowered until every shot fouls.
+    const data = JSON.parse(readFileSync('boards/classic.json', 'utf8'));
+    data.launcher.minSpeedMps = 2;
+    const table = createTable(parseBoard(data), 3);
+    table.fire.power = 0;
+    table.fire.held = true;
+    for (let i = 0; i < steps(5); i++) stepTable(table);
+    // Launched more than three: each foul came back and went out again.
+    expect(table.economy.launched).toBeGreaterThan(3);
+    expect(table.economy.entries.foul).toBe(table.economy.launched - table.world.balls.length);
+    expect(table.economy.balls + table.world.balls.length).toBe(3);
+  });
+
   it('does nothing with zero balls but advance the world', () => {
     const table = createTable(classic, 0);
     table.fire.held = true;

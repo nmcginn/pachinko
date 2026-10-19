@@ -36,8 +36,8 @@ import {
  * - `start`: the start pocket (ヘソ). Pays and triggers a spin (M3, M4).
  * - `out`: the out-hole. The ball is lost.
  * - `foul`: the bottom of the launch lane, for a shot too weak to reach the
- *   field. What it pays is a game rule (see PLAN.md open questions); the sim
- *   only reports it.
+ *   field. The ball goes back to the tray (PLAN.md game rules); the sim only
+ *   reports the capture and the economy returns the ball.
  */
 export const POCKET_KINDS = ['start', 'out', 'foul'] as const;
 export type PocketKind = (typeof POCKET_KINDS)[number];

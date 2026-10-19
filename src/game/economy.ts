@@ -1,6 +1,6 @@
-// Ball counts. M2 only takes a ball per launch and tallies where balls end
-// up; payouts (start pocket pays 3) arrive in M3. What a foul ball pays is an
-// open question for the maintainer (PLAN.md), so fouls are tallied, not paid.
+// Ball counts. Takes a ball per launch, tallies where balls end up, and puts
+// foul balls back in the tray (PLAN.md game rules). Payouts (start pocket
+// pays 3) arrive in M3.
 
 import type { PocketKind } from '../sim/board';
 
@@ -31,7 +31,11 @@ export function takeBallForLaunch(economy: Economy): boolean {
   return true;
 }
 
-/** Record a ball ending in a pocket. */
+/**
+ * Record a ball ending in a pocket. A foul ball never reached the field, so
+ * it goes back to the tray, as on real machines.
+ */
 export function recordEntry(economy: Economy, kind: PocketKind): void {
   economy.entries[kind] += 1;
+  if (kind === 'foul') economy.balls += 1;
 }

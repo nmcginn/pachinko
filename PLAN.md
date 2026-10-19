@@ -15,8 +15,8 @@ Agents: update this section at the end of every session.
 - Next up: M3. The Monte Carlo runner and start-pocket payout. Three things to know first. (1) Every shot at the same power follows the identical path (the sim is deterministic and nothing varies between launches), so a Monte Carlo needs a seeded source of variation, most likely small launch-speed jitter through `sim/rng.ts`. That is a physics-model choice: document it in PHYSICS.md. (2) The classic board has not been tuned at all: in a sweep of 101 powers, one ball entered the start pocket, and only powers below about 0.15 land in the middle of the field (PHYSICS.md, "Launch speed range"). (3) See the speed note below.
 - Heads-up for M3: with the broadphase the classic board runs about 274k ball-steps/s on the dev container. 100k balls at 1 to 2 s of flight each is around 3×10⁸ ball-steps, roughly 20 minutes single-threaded, so the 60 s budget still needs about 20× more. Worker threads over seed-split batches are the obvious lever; measure the step itself first.
 - Last session: 2026-10-19: M2 board and launcher: board schema and validator, pocket sensors, classic board, broadphase, auto-fire, dial and keyboard handle, HUD ball counter, board rendering.
-- Open questions for the maintainer:
-  - **What does a foul ball pay?** A shot too weak to get out of the launch lane rolls back into the foul pocket. On real machines a foul ball goes back to the tray. Options: (a) return it to the tray, as real machines do; (b) count it as lost, like the out-hole. Recommendation: (a). It doesn't block anything yet: at the classic board's launch range no handle setting fouls, and the economy only counts fouls for now. M3's payouts need the answer.
+- Open questions for the maintainer: —
+- Resolved: **What does a foul ball pay?** (2026-10-19) The maintainer decided it goes back to the tray, as on real machines. Now in "Game rules (v1)" and implemented in `src/game/economy.ts`.
 
 ---
 
@@ -98,6 +98,7 @@ Simplified Japanese pachinko ("deji-pachi" style), playable without knowing the 
 
 - Start with 250 balls (the classic ¥1000 rental).
 - Out-hole at the bottom: ball is lost.
+- Foul: a shot too weak to leave the launch lane rolls back into the foul pocket at the bottom of the lane, and the ball goes back to the tray, as on real machines. It is not lost and pays nothing extra.
 - **Start pocket (ヘソ):** pays 3 balls and triggers a reel spin. Up to 4 pending spins are held (保留) and shown as indicators. Extra entries beyond 4 pay out but don't add spins.
 - **Reel:** 3-digit display. Jackpot when all three match. Probability is configurable; default 1/99 so a session actually sees one. The reel result is decided by the lottery at entry time; the animation is presentation.
 - **Jackpot:** attacker gate opens for 10 rounds. Each round closes after 10 balls enter or 30 s, whichever comes first. Each ball entering pays 15.

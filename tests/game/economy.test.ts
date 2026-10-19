@@ -32,14 +32,23 @@ describe('economy', () => {
     expect(none.launched).toBe(0);
   });
 
-  it('tallies pocket entries without paying anything yet', () => {
+  it('tallies pocket entries without paying for out or start yet', () => {
     const e = createEconomy(10);
     recordEntry(e, 'out');
     recordEntry(e, 'out');
     recordEntry(e, 'start');
-    recordEntry(e, 'foul');
-    expect(e.entries).toEqual({ start: 1, out: 2, foul: 1 });
+    expect(e.entries).toEqual({ start: 1, out: 2, foul: 0 });
     expect(e.balls).toBe(10);
+  });
+
+  it('puts a foul ball back in the tray', () => {
+    const e = createEconomy(1);
+    takeBallForLaunch(e);
+    expect(e.balls).toBe(0);
+    recordEntry(e, 'foul');
+    expect(e).toMatchObject({ balls: 1, launched: 1, entries: { start: 0, out: 0, foul: 1 } });
+    // The returned ball can be launched again.
+    expect(takeBallForLaunch(e)).toBe(true);
   });
 
   it('rejects a negative or fractional starting count', () => {
