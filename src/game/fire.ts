@@ -37,10 +37,14 @@ export function setPower(control: FireControl, power: number): void {
  * first shot goes the moment the handle is held; then one every
  * FIRE_INTERVAL_STEPS while it stays held. The cooldown keeps running after
  * release, so tapping the handle can't beat the 100-a-minute cap.
+ *
+ * `laneClear` false (a ball still sits where the next one would appear)
+ * holds a due shot back until it is clear, as a real ball feed waits; the
+ * interval counts from the shot that actually goes.
  */
-export function stepFire(control: FireControl): boolean {
+export function stepFire(control: FireControl, laneClear = true): boolean {
   if (control.cooldownSteps > 0) control.cooldownSteps -= 1;
-  if (!control.held || control.cooldownSteps > 0) return false;
+  if (!control.held || control.cooldownSteps > 0 || !laneClear) return false;
   control.cooldownSteps = FIRE_INTERVAL_STEPS;
   return true;
 }

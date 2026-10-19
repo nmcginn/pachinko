@@ -6,10 +6,13 @@
 //   npx tsx tools/montecarlo.ts --board classic --balls 100000 --power 0.62 --seed 1
 //   npx tsx tools/montecarlo.ts --balls 10000 --sweep 0:1:0.05
 //
-// Results depend only on the board, power, ball count, and seed, never on
-// the number of workers: every ball draws from its own rng stream, and the
-// batches' integer tallies add up the same in any order. Stdout is therefore
-// byte-for-byte identical across runs; timing goes to stderr.
+// Balls are fired at the auto-fire rate into a shared world, so they collide
+// as in the game. Results depend only on the board, power, ball count, and
+// seed, never on the number of workers: the run is always cut into the same
+// batches of BATCH_BALLS, each its own world (with uncounted traffic either
+// side; see src/game/montecarlo.ts), and their integer tallies add up the
+// same in any order. Stdout is therefore byte-for-byte identical across
+// runs; timing goes to stderr.
 
 import { readFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
@@ -28,8 +31,9 @@ import { type Board, BoardError, parseBoard } from '../src/sim/board';
 
 const USAGE = `Usage: npx tsx tools/montecarlo.ts [options]
 
-Launch balls on a board headlessly and print start-pocket rate, out rate,
-and spins per ¥1000 (start-pocket entries per 250 balls launched).
+Launch balls on a board headlessly, at the auto-fire rate (100 a minute)
+so they collide as in play, and print start-pocket rate, out rate, and
+spins per ¥1000 (start-pocket entries per 250 balls launched).
 Gates (the attacker) stay closed, as in normal play, unless --open.
 
 Options:
@@ -49,7 +53,11 @@ Options:
 Results go to stdout and are identical for the same options. Timing goes
 to stderr.`;
 
-/** Balls per unit of work handed to a worker. Small enough to balance load, big enough to amortise messages. */
+/**
+ * Balls per unit of work handed to a worker. Small enough to balance load,
+ * big enough to amortise messages and each batch's uncounted traffic. Results
+ * depend on it (each batch is its own world), so changing it changes them.
+ */
 const BATCH_BALLS = 1000;
 
 interface Job {

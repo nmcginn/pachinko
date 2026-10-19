@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { type Material, CONTACT_SLOP_M, createCircle, createPolyline } from '../../src/sim/collide';
 import { createRng } from '../../src/sim/rng';
 import {
+  type Ball,
   type World,
   BALL_RADIUS_M,
   MAX_LAUNCH_SPEED_MPS,
@@ -16,6 +17,7 @@ import {
   addBall,
   ballEnergyJ,
   createWorld,
+  overlapsBall,
   stepWorld,
   totalEnergyJ,
 } from '../../src/sim/world';
@@ -322,3 +324,187 @@ describe('M1 acceptance: one ball dropped through a 10×10 nail grid', () => {
     expect(exits.size).toBeGreaterThan(10);
   });
 });
+
+// M5: the same invariants with balls colliding with each other. Energy moves
+// between balls in a collision, so the energy invariant is on the total, as
+// PLAN.md states it; it is still checked every step with no tolerance.
+
+/** The scene's nails and rails in a world with ball collisions on. */
+function withBallCollisions(scene: World): World {
+  return createWorld({
+    circles: scene.circles,
+    segments: scene.segments,
+    ballCollisions: true,
+    ...(scene.bounds ? { bounds: scene.bounds } : {}),
+  });
+}
+
+/** Fill the world with `count` balls above the grid, at random speeds up to `maxSpeedMps` in any direction. */
+function addManyBalls(world: World, seed: number, count: number, maxSpeedMps: number): void {
+  const rng = createRng(seed);
+  while (world.balls.length < count) {
+    const x = rng.range(0.02, GRID_WIDTH_M - 0.02);
+    const y = GRID_DROP_Y_M + rng.range(-0.01, 0.05);
+    const angle = rng.range(0, 2 * Math.PI);
+    const speed = rng.range(0, maxSpeedMps);
+    if (overlapsBall(world, x, y)) continue;
+    addBall(world, { x, y, vx: speed * Math.cos(angle), vy: speed * Math.sin(angle) });
+  }
+}
+
+/** Closest any two balls come, centre to centre, minus a ball's diameter. */
+function minPairGapM(world: World): number {
+  let min = Infinity;
+  const bs = world.balls;
+  for (let a = 0; a < bs.length; a++) {
+    for (let b = a + 1; b < bs.length; b++) {
+      const p = bs[a] as Ball;
+      const q = bs[b] as Ball;
+      min = Math.min(min, Math.hypot(p.x - q.x, p.y - q.y) - 2 * BALL_RADIUS_M);
+    }
+  }
+  return min;
+}
+
+describe('invariant with many balls colliding: total mechanical energy never increases', () => {
+  const materials: [string, Material, Material][] = [
+    ['default materials', NAIL_MATERIAL, RAIL_MATERIAL],
+    [
+      'near-elastic, frictionless',
+      { restitution: 0.95, friction: 0 },
+      { restitution: 0.95, friction: 0 },
+    ],
+    ['dead and grippy', { restitution: 0, friction: 1 }, { restitution: 0, friction: 1 }],
+  ];
+
+  for (const [name, nail, rail] of materials) {
+    it(`holds every step for 30 balls in the closed grid (${name})`, () => {
+      // Closed, so nothing leaves: the balls fly, collide, pile up in the V
+      // floor, and settle, and the total covers every one of them throughout.
+      const world = withBallCollisions(
+        gridWorld({ nailMaterial: nail, railMaterial: rail, closed: true }),
+      );
+      addManyBalls(world, 11, 30, MAX_LAUNCH_SPEED_MPS);
+      let previous = totalEnergyJ(world);
+      for (let i = 0; i < steps(3); i++) {
+        stepWorld(world);
+        const now = totalEnergyJ(world);
+        if (!(now <= previous)) {
+          throw new Error(`total energy rose by ${now - previous} J on step ${i} (${name})`);
+        }
+        previous = now;
+      }
+      expect(world.balls.length).toBe(30);
+    });
+  }
+});
+
+describe('invariant with many balls colliding: no tunnelling at launch speed', () => {
+  it('never lets a ball into a nail, a rail, or another ball, 30 balls at max launch speed', () => {
+    for (const seed of [5, 6]) {
+      const world = withBallCollisions(gridWorld({ closed: true }));
+      const rng = createRng(seed);
+      while (world.balls.length < 30) {
+        const x = rng.range(0.02, GRID_WIDTH_M - 0.02);
+        const y = GRID_DROP_Y_M + rng.range(-0.01, 0.05);
+        const angle = rng.range(0, 2 * Math.PI);
+        if (overlapsBall(world, x, y)) continue;
+        addBall(world, {
+          x,
+          y,
+          vx: MAX_LAUNCH_SPEED_MPS * Math.cos(angle),
+          vy: MAX_LAUNCH_SPEED_MPS * Math.sin(angle),
+        });
+      }
+      for (let i = 0; i < steps(1); i++) {
+        stepWorld(world);
+        expect(minPairGapM(world)).toBeGreaterThanOrEqual(-CONTACT_SLOP_M);
+        for (const ball of world.balls) {
+          expect(clearanceM(world, ball.x, ball.y)).toBeGreaterThanOrEqual(-CONTACT_SLOP_M);
+          expect(ball.x).toBeGreaterThan(0);
+          expect(ball.x).toBeLessThan(GRID_WIDTH_M);
+        }
+      }
+      expect(world.balls.length).toBe(30);
+    }
+  });
+});
+
+describe('invariant with many balls colliding: a resting heap stays put', () => {
+  it('in a walled V pocket, six balls dropped in come to rest and do not jitter or creep', () => {
+    // The V pocket with tall walls on its rims, so no ball bounces out.
+    const rim = pocketWorld().segments;
+    const left = rim[0];
+    const right = rim[rim.length - 1];
+    if (!left || !right) throw new Error('pocket has no rails');
+    const world = createWorld({
+      ballCollisions: true,
+      segments: [
+        ...rim,
+        ...createPolyline(
+          [
+            { x: left.ax, y: left.ay },
+            { x: left.ax, y: 0.3 },
+          ],
+          RAIL_MATERIAL,
+        ),
+        ...createPolyline(
+          [
+            { x: right.bx, y: right.by },
+            { x: right.bx, y: 0.3 },
+          ],
+          RAIL_MATERIAL,
+        ),
+      ],
+    });
+    for (let k = 0; k < 6; k++) {
+      addBall(world, { x: -0.015 + 0.006 * k, y: 0.03 + 0.015 * k });
+    }
+    for (let i = 0; i < steps(5); i++) stepWorld(world);
+    expect(world.balls).toHaveLength(6);
+    // The balls rest against each other, not only on the rails.
+    expect(minPairGapM(world)).toBeLessThan(1e-6);
+    const settled = snapshotBalls(world);
+    for (let i = 0; i < steps(10); i++) {
+      stepWorld(world);
+      expect(snapshotBalls(world)).toEqual(settled);
+    }
+    for (const ball of world.balls) {
+      expect(ball.vx).toBe(0);
+      expect(ball.vy).toBe(0);
+    }
+    expect(minPairGapM(world)).toBeGreaterThanOrEqual(-CONTACT_SLOP_M);
+  });
+});
+
+describe('invariant with many balls colliding: determinism', () => {
+  function runBusyGrid(seed: number): number[] {
+    // Open at the bottom, so balls collide on the way down and leave.
+    const world = withBallCollisions(gridWorld());
+    addManyBalls(world, seed, 30, 1);
+    const out: number[] = [];
+    for (let i = 0; i < steps(2); i++) {
+      stepWorld(world);
+      out.push(...snapshotBalls(world));
+    }
+    return out;
+  }
+
+  it('gives identical trajectories for the same seed, with 30 balls', () => {
+    const a = runBusyGrid(42);
+    const b = runBusyGrid(42);
+    expect(a.length).toBeGreaterThan(0);
+    expect(a.length).toBe(b.length);
+    for (let i = 0; i < a.length; i++) {
+      if (!Object.is(a[i], b[i])) throw new Error(`runs diverge at index ${i}: ${a[i]} vs ${b[i]}`);
+    }
+  });
+
+  it('gives different trajectories for different seeds', () => {
+    expect(runBusyGrid(42)).not.toEqual(runBusyGrid(43));
+  });
+});
+
+function snapshotBalls(world: World): number[] {
+  return world.balls.flatMap((b) => [b.id, b.x, b.y, b.vx, b.vy]);
+}

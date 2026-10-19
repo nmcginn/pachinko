@@ -7,6 +7,7 @@ import {
   type PocketKind,
   createBoardWorld,
   launchBall,
+  launcherClear,
   pocketKind,
 } from '../sim/board';
 import { type Rng, createRng, streamSeed } from '../sim/rng';
@@ -61,14 +62,17 @@ export function createTable(board: Board, options: TableOptions = {}): Table {
 }
 
 /**
- * One fixed step: fire if the handle says so and the tray has a ball, step
+ * One fixed step: fire if the handle says so, the tray has a ball, and the
+ * last ball has cleared the launch point (balls collide since M5), step
  * the world, pay and report the step's pocket entries, step the machine, then
  * open or close the attacker to match it. A ball the closing lid sweeps in
  * pays like any other attacker entry, after the round has ended.
  */
 export function stepTable(table: Table): void {
   const { board, world, economy, fire, machine, rng } = table;
-  if (stepFire(fire) && takeBallForLaunch(economy)) launchBall(world, board, fire.power, rng);
+  if (stepFire(fire, launcherClear(world, board)) && takeBallForLaunch(economy)) {
+    launchBall(world, board, fire.power, rng);
+  }
   stepWorld(world);
   recordCaptures(table, world.captures);
   stepMachine(machine);

@@ -5,7 +5,7 @@
 // overlaps. Candidate lists are in ascending shape index, the same order a
 // brute-force pass visits them, and the world keeps the first earliest hit,
 // so results are bit-for-bit identical to testing every shape (checked by
-// test). Reused for ball–ball in M5.
+// test). Balls move, so ball–ball (M5) has its own per-step hash, in world.ts.
 
 import type { CircleShape, SegmentShape } from './collide';
 
