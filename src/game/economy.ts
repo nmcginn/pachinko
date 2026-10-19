@@ -1,11 +1,13 @@
-// Ball counts. Takes a ball per launch, tallies where balls end up, and puts
-// foul balls back in the tray (PLAN.md game rules). Payouts (start pocket
-// pays 3) arrive in M3.
+// Ball counts. Takes a ball per launch, tallies where balls end up, pays
+// out for the start pocket, and puts foul balls back in the tray (PLAN.md
+// game rules).
 
 import type { PocketKind } from '../sim/board';
 
 /** The classic ¥1000 rental. */
 export const STARTING_BALLS = 250;
+/** Balls paid into the tray for each start-pocket (ヘソ) entry. */
+export const START_POCKET_PAYOUT = 3;
 
 export interface Economy {
   /** Balls in the tray, available to launch. */
@@ -14,13 +16,20 @@ export interface Economy {
   launched: number;
   /** Balls that have ended in each kind of pocket. */
   readonly entries: Record<PocketKind, number>;
+  /** Balls paid into the tray by pockets since the start. Foul returns are not payouts. */
+  paidOut: number;
 }
 
 export function createEconomy(startingBalls = STARTING_BALLS): Economy {
   if (!(Number.isInteger(startingBalls) && startingBalls >= 0)) {
     throw new RangeError(`starting balls must be a whole number ≥ 0, got ${startingBalls}`);
   }
-  return { balls: startingBalls, launched: 0, entries: { start: 0, out: 0, foul: 0 } };
+  return {
+    balls: startingBalls,
+    launched: 0,
+    entries: { start: 0, out: 0, foul: 0 },
+    paidOut: 0,
+  };
 }
 
 /** Take a ball from the tray for a launch. False, and nothing changes, if the tray is empty. */
@@ -32,10 +41,16 @@ export function takeBallForLaunch(economy: Economy): boolean {
 }
 
 /**
- * Record a ball ending in a pocket. A foul ball never reached the field, so
- * it goes back to the tray, as on real machines.
+ * Record a ball ending in a pocket. The start pocket pays START_POCKET_PAYOUT
+ * into the tray (its spin is M4's). A foul ball never reached the field, so
+ * it goes back to the tray, as on real machines. The out-hole pays nothing.
  */
 export function recordEntry(economy: Economy, kind: PocketKind): void {
   economy.entries[kind] += 1;
-  if (kind === 'foul') economy.balls += 1;
+  if (kind === 'start') {
+    economy.balls += START_POCKET_PAYOUT;
+    economy.paidOut += START_POCKET_PAYOUT;
+  } else if (kind === 'foul') {
+    economy.balls += 1;
+  }
 }
