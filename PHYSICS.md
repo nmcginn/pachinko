@@ -75,7 +75,7 @@ A ball still in play 30 s after its launch is counted stuck and removed. No real
 
 How much it matters: at the auto-fire rate there are about 3 balls in flight at power 0 and 2 at power 0.62, and only 0.2% (power 0) to 0.3% (power 0.62) of balls ever touch another (3000 balls each, seed 1). So the rates barely move; see the tuning log.
 
-Speed: about 3.4 k sim steps per ball on the classic board at power 0 (1.7 s of flight). On the dev container one 1000-ball batch takes 1.4 s on one thread, against 1.0 s for M3's one-at-a-time method; the shared world takes 1200 steps per ball whatever is in flight. 100k balls at power 0 take about 29 s on 4 workers (M3: 19 s), against CI's 60 s limit.
+Speed: about 3.4 k sim steps per ball on the classic board at power 0 (1.7 s of flight). On the dev container a 1000-ball batch takes about 1.4 times as long on one thread as M3's one-at-a-time method (measured twice: 1.41 s against 1.00 s, and 2.10 s against 1.49 s on a busier machine); the shared world takes 1200 steps per ball whatever is in flight. On CI, M3's two 100k runs took 56 s together, about 1.45 times the dev container, so this method should take about 42 s per run there. 100k balls at power 0 take about 29 s on 4 workers (M3: 19 s), against CI's 60 s limit.
 
 ### Rails as polylines
 
