@@ -42,4 +42,5 @@ If a decision needs the maintainer (game rules, feel, ambiguous spec), don't gue
 - TypeScript strict. No `any` without a comment explaining why.
 - SI units in sim code. Name variables with units when ambiguous (`speedMps`, `radiusM`).
 - UI font: Jost, with a system sans-serif fallback.
+- The repo is public. In committed text, commit messages, PRs, and PR comments, refer to people by role ("the maintainer", "the reviewer"), never by name.
 - Prefer small pure functions in `sim/` and `game/`. Rendering code can be more pragmatic.
