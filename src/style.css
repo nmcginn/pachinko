@@ -1,0 +1,39 @@
+:root {
+  color-scheme: dark;
+  font-family: Jost, system-ui, sans-serif;
+  background: #14161a;
+  color: #e8e4d8;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+#board {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  touch-action: none;
+}
+
+#debug {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  margin: 0;
+  padding: 6px 8px;
+  font:
+    12px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: pre;
+  background: rgb(0 0 0 / 0.55);
+  border-radius: 4px;
+  pointer-events: none;
+}

@@ -1,0 +1,11 @@
+{
+  // src/sim and src/game must run under Node with no DOM. Compiling them
+  // without DOM or Node types makes any reference to `window`, `document`,
+  // canvas types, etc. a type error. ESLint separately bans Math.random and Date.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src/sim", "src/game"]
+}
