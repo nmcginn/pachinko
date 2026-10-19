@@ -11,8 +11,10 @@ Stack: Vite + TypeScript (strict), Canvas 2D, Vitest for unit tests, Playwright 
 Agents: update this section at the end of every session.
 
 - Current milestone: M0
-- Last session: —
-- Open questions for Nathan: —
+- Done in this milestone: —
+- Next up: M0 bootstrap (Vite, TypeScript, lint, tests, CI, Pages config, canvas loop)
+- Last session: 2026-10-19: added the `/nightly` command, PR template, and session-start hook. No game code yet.
+- Open questions for the maintainer: —
 
 ---
 
