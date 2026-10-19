@@ -1,6 +1,6 @@
 // HUD: ball counter and the launch handle's power, as DOM over the canvas.
-// Hold indicators join it in M4. data-* attributes mirror the numbers so
-// tests can read them without parsing text.
+// (The hold indicators are on the reel panel, render/reel.ts.) data-*
+// attributes mirror the numbers so tests can read them without parsing text.
 
 import type { Economy } from '../game/economy';
 import type { FireControl } from '../game/fire';
@@ -27,6 +27,8 @@ export function createHud(els: HudElements): Hud {
   let shownInPlay = NaN;
   let shownStarts = NaN;
   let shownLaunched = NaN;
+  let shownAttacker = NaN;
+  let shownFoul = NaN;
 
   return {
     update(economy, fire, inPlay) {
@@ -38,6 +40,14 @@ export function createHud(els: HudElements): Hud {
       if (economy.entries.start !== shownStarts) {
         shownStarts = economy.entries.start;
         els.balls.dataset['starts'] = String(economy.entries.start);
+      }
+      if (economy.entries.attacker !== shownAttacker) {
+        shownAttacker = economy.entries.attacker;
+        els.balls.dataset['attacker'] = String(economy.entries.attacker);
+      }
+      if (economy.entries.foul !== shownFoul) {
+        shownFoul = economy.entries.foul;
+        els.balls.dataset['fouls'] = String(economy.entries.foul);
       }
       if (economy.launched !== shownLaunched) {
         shownLaunched = economy.launched;

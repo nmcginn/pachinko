@@ -51,6 +51,80 @@ body {
   pointer-events: none;
 }
 
+/* LCD-style reel panel, top centre, above the board. The board is fitted
+   below REEL_BAND_PX (render/reel.ts): keep the two in step. */
+#reel {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  height: 72px;
+  min-width: 132px;
+  padding: 4px 12px;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  justify-items: center;
+  background: linear-gradient(#0b1a12, #12281c);
+  border: 2px solid #c9a227;
+  border-radius: 8px;
+  box-shadow: inset 0 0 12px rgb(0 0 0 / 0.8);
+  color: #8dffb8;
+  text-shadow: 0 0 6px rgb(120 255 170 / 0.7);
+  pointer-events: none;
+}
+
+#reel-digits {
+  display: flex;
+  gap: 6px;
+  font-weight: 500;
+  font-size: 32px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.reel-digit {
+  width: 0.7em;
+  text-align: center;
+}
+
+.reel-digit.spinning {
+  opacity: 0.55;
+  filter: blur(0.6px);
+}
+
+#reel-holds {
+  display: flex;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.reel-hold {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid #4f8f68;
+}
+
+.reel-hold.lit {
+  background: #8dffb8;
+  box-shadow: 0 0 6px #8dffb8;
+}
+
+#reel-status {
+  min-height: 14px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+#reel.jackpot {
+  border-color: #ff6a4d;
+  color: #ffd36b;
+  text-shadow: 0 0 8px rgb(255 200 90 / 0.8);
+}
+
 /* Launch handle: bottom right, under the right thumb on a phone. */
 #handle {
   position: fixed;

@@ -10,6 +10,17 @@
   <body>
     <canvas id="board" aria-label="Pachinko board"></canvas>
     <pre id="debug" aria-hidden="true"></pre>
+    <div id="reel" role="status" aria-label="Reel">
+      <div id="reel-digits">
+        <span class="reel-digit">0</span><span class="reel-digit">0</span
+        ><span class="reel-digit">0</span>
+      </div>
+      <div id="reel-holds" aria-label="Held spins">
+        <span class="reel-hold"></span><span class="reel-hold"></span><span class="reel-hold"></span
+        ><span class="reel-hold"></span>
+      </div>
+      <div id="reel-status"></div>
+    </div>
     <div id="hud">
       <div id="balls" data-balls="">Balls –</div>
     </div>
