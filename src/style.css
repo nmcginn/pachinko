@@ -37,3 +37,64 @@ body {
   border-radius: 4px;
   pointer-events: none;
 }
+
+#hud {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  padding: 6px 12px;
+  font-weight: 500;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  background: rgb(0 0 0 / 0.55);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+/* Launch handle: bottom right, under the right thumb on a phone. */
+#handle {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 40%, #3a3f48, #1d2026);
+  border: 2px solid #c9a227;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+#handle.held {
+  border-color: #f0c84a;
+  cursor: grabbing;
+}
+
+#handle-knob {
+  position: absolute;
+  inset: 10px;
+  border-radius: 50%;
+}
+
+.handle-mark {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 6px;
+  height: 26px;
+  margin-left: -3px;
+  border-radius: 3px;
+  background: #e8e4d8;
+}
+
+#handle-power {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-weight: 500;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
