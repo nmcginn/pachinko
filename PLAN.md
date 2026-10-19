@@ -10,10 +10,10 @@ Stack: Vite + TypeScript (strict), Canvas 2D, Vitest for unit tests, Playwright 
 
 Agents: update this section at the end of every session.
 
-- Current milestone: M0
-- Done in this milestone: —
-- Next up: M0 bootstrap (Vite, TypeScript, lint, tests, CI, Pages config, canvas loop)
-- Last session: 2026-10-19: added the `/nightly` command, PR template, and session-start hook. No game code yet.
+- Current milestone: M0 (every criterion implemented and passing locally; it's done once CI is green on the M0 PR and that PR is merged, then advance to M1)
+- Done in this milestone: Vite + TS strict, ESLint (with sim/game purity rules), Prettier, Vitest, Playwright, `tsx`; `npm run check`; GitHub Actions (`check` + e2e); Cloudflare Pages config (`wrangler.toml`, `.nvmrc`); full-height DPR-aware canvas with fixed-timestep loop and debug overlay; pause while hidden; PHYSICS.md; directory layout with stubs.
+- Next up: M1 physics core (`vec`, `collide`, `world`, `rng`, invariant tests). `src/sim/world.ts` already has `SIM_STEP_S` and a clock-only world to extend.
+- Last session: 2026-10-19: M0 bootstrap: tooling, CI, Pages config, canvas loop with debug overlay, stubs.
 - Open questions for the maintainer: —
 
 ---
@@ -30,6 +30,7 @@ Agents: update this section at the end of every session.
 │   └── classic.json        # Board definitions as data (nails, rails, pockets)
 ├── src/
 │   ├── main.ts             # Boot: load board, start loop, wire input
+│   ├── loop.ts             # Fixed-timestep frame loop, pause while hidden (host injected, unit-tested)
 │   ├── sim/                # Pure TS physics. No DOM, no rendering, no Date/Math.random
 │   │   ├── vec.ts
 │   │   ├── world.ts        # Fixed-step integrator, ball lifecycle
@@ -42,6 +43,8 @@ Agents: update this section at the end of every session.
 │   │   ├── lottery.ts      # Jackpot draw, hold queue (保留)
 │   │   └── economy.ts      # Ball counts, payouts
 │   ├── render/             # Canvas drawing only. Reads sim/game state, never mutates it
+│   │   ├── canvas.ts       # Backing store sized to CSS size × devicePixelRatio
+│   │   ├── debug.ts        # Debug overlay (FPS, steps/frame); fps.ts holds the pure meter
 │   │   ├── board.ts
 │   │   ├── balls.ts
 │   │   ├── reel.ts
@@ -108,6 +111,7 @@ Out of scope: real money, ads, accounts, leaderboards.
 Each milestone has acceptance criteria. A milestone is done only when every criterion passes in CI.
 
 ### M0: Bootstrap
+
 - Vite + TypeScript strict, ESLint, Prettier, Vitest, Playwright, `tsx`.
 - `npm run check` runs typecheck, lint, and unit tests.
 - GitHub Actions runs `check` and the Playwright smoke test on every PR.
@@ -118,10 +122,12 @@ Each milestone has acceptance criteria. A milestone is done only when every crit
 - **Accept:** `npm run check` passes; Playwright loads the page with no console errors; canvas is crisp at devicePixelRatio 2.
 
 ### M1: Physics core
+
 - `vec`, `collide` (ball–circle, ball–segment), `world` with fixed step, `rng`.
 - **Accept:** all invariants above have passing tests; a test scene of 1 ball dropped through a 10×10 nail grid completes deterministically.
 
 ### M2: Board and launcher
+
 - Board JSON schema with validation (nails, rails as polylines, pockets as sensor regions).
 - `boards/classic.json`: outer guide rail, launch lane, nail field, start pocket, out-hole.
 - Launch handle: drag/touch dial plus keyboard (arrow keys adjust power, space holds fire). Auto-fire at 100/min while held.
@@ -129,39 +135,46 @@ Each milestone has acceptance criteria. A milestone is done only when every crit
 - **Accept:** a ball launched at mid power clears the top rail and lands in the field; balls exit through the out-hole and are removed; Playwright test holds fire for 3 s and sees the counter drop.
 
 ### M3: Headless runner and start pocket
+
 - `tools/montecarlo.ts --board classic --balls 100000 --power 0.62 --seed 1` prints start-pocket rate, out rate, and spins per ¥1000. Also supports a power sweep that prints a table.
 - Start pocket pays 3 balls.
 - **Accept:** runs 100k balls in under 60 s on CI; default board lands in the 18–24 spins/¥1000 range at its best power; the result is identical across two runs with the same seed.
 
 ### M4: Reel and jackpot
+
 - `game/machine.ts` state machine with hold queue, lottery, and jackpot rounds. Pure and fully unit-tested.
 - Reel display rendered as an LCD-style panel above the nail field.
 - Attacker gate geometry in the board; it opens and closes per round.
 - **Accept:** state-machine tests cover hold overflow, jackpot during held spins, and round end by count and by timeout; a forced-jackpot debug key plays a full 10-round sequence in the browser.
 
 ### M5: Tulips and ball–ball
+
 - Tulip pockets with timed open state that changes their geometry.
 - Ball–ball collisions via spatial hash.
 - **Accept:** Monte Carlo shows tulip entry rate increases while open; energy and determinism invariants still pass with many balls.
 
 ### M6: Game feel
+
 - WebAudio: ball rattle (rate-limited), pocket chime, reel spin, jackpot fanfare. Mute toggle.
 - Visual: specular highlight on balls, nail glints, screen flash and reel celebration on jackpot.
 - Haptics on mobile where supported.
 - **Accept:** no audio until first user interaction; frame time stays under 8 ms on a mid-range laptop with 30 balls in play.
 
 ### M7: Nail-adjust mode
+
 - Toggle into edit mode: select and nudge nails (±0.1 mm steps), or bend them (angle).
 - Live stats panel runs Monte Carlo in a Web Worker and updates spins per ¥1000 as you edit.
 - Export/import boards as JSON.
 - **Accept:** moving the two nails beside the start pocket outward measurably raises the start rate in the panel; edits round-trip through export/import.
 
 ### M8: Polish and mobile
+
 - Responsive layout, portrait-first. Respects `prefers-reduced-motion` (no screen flash).
 - Settings: jackpot probability, starting balls, sound.
 - **Accept:** playable one-handed on a phone; Lighthouse performance ≥ 90.
 
 ### M9 (optional)
+
 - 確変 (probability-change) mode after certain jackpots.
 - Multiple boards with different nail layouts.
 - Session stats graph (ball count over time).
