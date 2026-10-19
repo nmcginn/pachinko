@@ -1,0 +1,6 @@
+# Cloudflare Pages project config.
+# Build command (set in the Pages dashboard, wrangler.toml cannot hold it): npm run build
+# Node version comes from .nvmrc.
+name = "pachinko"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-10-01"
