@@ -28,6 +28,7 @@ import {
   createHit,
   resolveBallContact,
   resolveContact,
+  restingSpeedMps,
   sweepCapsule,
   sweepDisc,
 } from './collide';
@@ -426,9 +427,21 @@ interface StaticEvent {
   material: Material | null;
   /** Set when a pocket takes the ball. Neither set: the move is clear. */
   sensor: SensorShape | null;
+  /** For an impact, the nail's index in world.circles, or −1. */
+  circle: number;
+  /** For an impact, the rail segment's index in world.segments, or −1. */
+  segment: number;
 }
 
-const event: StaticEvent = { t: 1, nx: 0, ny: 0, material: null, sensor: null };
+const event: StaticEvent = {
+  t: 1,
+  nx: 0,
+  ny: 0,
+  material: null,
+  sensor: null,
+  circle: -1,
+  segment: -1,
+};
 
 /** Sweep the move from (x, y) by (dx, dy) against every nail, rail, and pocket. */
 function findStaticEvent(
@@ -440,6 +453,8 @@ function findStaticEvent(
   out: StaticEvent,
 ): void {
   let material: Material | null = null;
+  let circle = -1;
+  let segment = -1;
   best.t = Infinity;
 
   if (world.grid) {
@@ -456,6 +471,7 @@ function findStaticEvent(
         best.nx = hit.nx;
         best.ny = hit.ny;
         material = c.material;
+        circle = ci;
       }
     }
   }
@@ -468,6 +484,8 @@ function findStaticEvent(
         best.nx = hit.nx;
         best.ny = hit.ny;
         material = s.material;
+        circle = -1;
+        segment = si;
       }
     }
   }
@@ -488,6 +506,8 @@ function findStaticEvent(
   out.t = sensor ? sensorT : best.t;
   out.nx = best.nx;
   out.ny = best.ny;
+  out.circle = circle;
+  out.segment = segment;
 }
 
 /**
@@ -555,6 +575,14 @@ let eventRemaining = new Float64Array(0);
 let eventT = new Float64Array(0);
 let eventNx = new Float64Array(0);
 let eventNy = new Float64Array(0);
+let eventCircle = new Int32Array(0);
+let eventSegment = new Int32Array(0);
+/**
+ * The nail (circle index) or rail segment a ball last came to rest against
+ * this step and may be sliding along, or −1: see resolveBallContact.
+ */
+let slideCircle = new Int32Array(0);
+let slideSegment = new Int32Array(0);
 const eventMaterial: (Material | null)[] = [];
 const eventSensor: (SensorShape | null)[] = [];
 let cellX = new Float64Array(0);
@@ -589,6 +617,10 @@ function growScratch(n: number): void {
   eventT = new Float64Array(size);
   eventNx = new Float64Array(size);
   eventNy = new Float64Array(size);
+  eventCircle = new Int32Array(size);
+  eventSegment = new Int32Array(size);
+  slideCircle = new Int32Array(size);
+  slideSegment = new Int32Array(size);
   cellX = new Float64Array(size);
   cellY = new Float64Array(size);
   hashNext = new Int32Array(size);
@@ -636,7 +668,7 @@ function stepBallsTogether(world: World): void {
   if (pairA.length > 0) moveTogether(world);
 }
 
-/** Spatial-hash cell of a coordinate, for cells `cellM` wide. */
+/** Hash bucket of grid cell (cx, cy), in a table of mask + 1 buckets. */
 function hashCell(cx: number, cy: number, mask: number): number {
   return (Math.imul(cx | 0, 0x9e3779b1) ^ Math.imul(cy | 0, 0x85ebca77)) & mask;
 }
@@ -752,6 +784,8 @@ function moveTogether(world: World): void {
     impactCount[i] = 0;
     touchedAny[i] = 0;
     contactRoot[i] = i;
+    slideCircle[i] = -1;
+    slideSegment[i] = -1;
     stepSensors[i] = null;
     findBallEvent(world, i);
   }
@@ -797,13 +831,15 @@ function moveTogether(world: World): void {
         continue;
       }
       remaining[i] = r * (1 - t);
-      resolveContact(
-        ball,
-        eventNx[i] as number,
-        eventNy[i] as number,
-        eventMaterial[i] as Material,
-        GRAVITY_DV_MPS,
-      );
+      const nx = eventNx[i] as number;
+      const ny = eventNy[i] as number;
+      const material = eventMaterial[i] as Material;
+      // A resting contact leaves the ball sliding along the surface.
+      const resting =
+        -(ball.vx * nx + ball.vy * ny) < restingSpeedMps(material.restitution, GRAVITY_DV_MPS);
+      slideCircle[i] = resting ? (eventCircle[i] as number) : -1;
+      slideSegment[i] = resting ? (eventSegment[i] as number) : -1;
+      resolveContact(ball, nx, ny, material, GRAVITY_DV_MPS);
       touchedAny[i] = 1;
       countImpact(ball, i);
       findBallEvent(world, i);
@@ -822,6 +858,8 @@ function moveTogether(world: World): void {
       ballB.y += ballB.vy * ((remaining[b] as number) - at);
       remaining[a] = at;
       remaining[b] = at;
+      slidingNormal(world, a, surfaceA);
+      slidingNormal(world, b, surfaceB);
       resolveBallContact(
         ballA,
         ballB,
@@ -829,6 +867,10 @@ function moveTogether(world: World): void {
         pairNy[bestPair] as number,
         BALL_RESTITUTION,
         GRAVITY_DV_MPS,
+        surfaceA.x,
+        surfaceA.y,
+        surfaceB.x,
+        surfaceB.y,
       );
       touchedAny[a] = 1;
       touchedAny[b] = 1;
@@ -854,6 +896,44 @@ function moveTogether(world: World): void {
     ball.y += ball.vy * r;
   }
   guardEnergyTogether(balls);
+}
+
+const surfaceA = { x: 0, y: 0 };
+const surfaceB = { x: 0, y: 0 };
+
+/**
+ * The unit normal of the nail or rail ball i is sliding along, pointing
+ * toward the ball, into `out`; zero if it isn't sliding along one or has
+ * since left it.
+ */
+function slidingNormal(world: World, i: number, out: { x: number; y: number }): void {
+  const ball = world.balls[i] as Ball;
+  out.x = 0;
+  out.y = 0;
+  let dx: number;
+  let dy: number;
+  let reach: number;
+  const ci = slideCircle[i] as number;
+  const si = slideSegment[i] as number;
+  if (ci >= 0) {
+    const c = world.circles[ci] as CircleShape;
+    dx = ball.x - c.x;
+    dy = ball.y - c.y;
+    reach = BALL_RADIUS_M + c.radiusM;
+  } else if (si >= 0) {
+    const s = world.segments[si] as SegmentShape;
+    const along = Math.min(s.lengthM, Math.max(0, (ball.x - s.ax) * s.ux + (ball.y - s.ay) * s.uy));
+    dx = ball.x - (s.ax + s.ux * along);
+    dy = ball.y - (s.ay + s.uy * along);
+    reach = BALL_RADIUS_M;
+  } else {
+    return;
+  }
+  const dist = Math.hypot(dx, dy);
+  if (dist > 0 && dist <= reach + CONTACT_SLOP_M) {
+    out.x = dx / dist;
+    out.y = dy / dist;
+  }
 }
 
 /** Count an impact on ball i; a ball out of impacts with step time left is wedged and held still. */
@@ -889,6 +969,8 @@ function findBallEvent(world: World, i: number): void {
   eventNy[i] = event.ny;
   eventMaterial[i] = event.material;
   eventSensor[i] = event.sensor;
+  eventCircle[i] = event.circle;
+  eventSegment[i] = event.segment;
 }
 
 /**

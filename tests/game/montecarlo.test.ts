@@ -107,6 +107,13 @@ describe('montecarlo: runBatch', () => {
     expect(at(500)).toMatchObject({ launched: 2, stuck: 2 });
   });
 
+  it('keeps the out-hole floor clear: no jam of balls lying on balls (regression)', () => {
+    // Ball 4269 of this run once stopped on the floor with ball 4270 lying
+    // on it, and every later ball piled up behind (PHYSICS.md, "Ball against ball").
+    const t = runBatch(classic, { power: 0.2, seed: 1, first: 4250, count: 40 });
+    expect(t.stuck).toBe(0);
+  });
+
   it('runs zero balls', () => {
     expect(runBatch(classic, { power: 0.5, seed: 1, count: 0 })).toEqual(createTally());
   });

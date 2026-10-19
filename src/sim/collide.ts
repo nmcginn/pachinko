@@ -336,6 +336,13 @@ export function resolveContact(
  * instead of bouncing every step, as on a rail. Momentum is conserved, and
  * kinetic energy falls by (1 − e²)·vn²/4 per unit mass, so the pair never
  * gains energy.
+ *
+ * A ball sliding along a nail or rail can be given that surface's normal
+ * (pointing toward the ball; zero for none). If the impulse pushes the ball
+ * into it, the ball only moves along it and the surface takes the rest, in
+ * the same impulse. Without that, a ball lying on a ball that lies on a rail
+ * would need the two contacts resolved in turn, over and over, each undoing
+ * a little of the other, and the pair would run out of impacts and stop.
  */
 export function resolveBallContact(
   a: BallState,
@@ -344,14 +351,25 @@ export function resolveBallContact(
   ny: number,
   restitution: number,
   gravityDvMps: number,
+  aSurfaceNx = 0,
+  aSurfaceNy = 0,
+  bSurfaceNx = 0,
+  bSurfaceNy = 0,
 ): void {
   const vn = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
   if (vn >= 0) return;
   const e = -vn < restingSpeedMps(restitution, gravityDvMps) ? 0 : restitution;
-  // Each ball takes half the change in relative normal speed.
-  const j = (-(1 + e) * vn) / 2;
-  a.vx += j * nx;
-  a.vy += j * ny;
-  b.vx -= j * nx;
-  b.vy -= j * ny;
+  // The impulse pushes a along +n and b along −n. Into its surface (a
+  // negative component along the surface normal), a ball keeps only the part
+  // along the surface, and the pair's effective mass along n rises to match.
+  const intoA = Math.min(0, nx * aSurfaceNx + ny * aSurfaceNy);
+  const intoB = Math.min(0, -(nx * bSurfaceNx + ny * bSurfaceNy));
+  const k = 2 - intoA * intoA - intoB * intoB;
+  if (!(k > 0)) return; // Both held along n by their surfaces: neither can move.
+  // Each ball's share of the change in relative normal speed.
+  const j = (-(1 + e) * vn) / k;
+  a.vx += j * (nx - intoA * aSurfaceNx);
+  a.vy += j * (ny - intoA * aSurfaceNy);
+  b.vx -= j * (nx + intoB * bSurfaceNx);
+  b.vy -= j * (ny + intoB * bSurfaceNy);
 }

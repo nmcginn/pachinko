@@ -116,6 +116,38 @@ describe('resolveBallContact', () => {
     }
   });
 
+  it('moves a ball pushed into the surface it slides on only along that surface', () => {
+    // b lies on a floor (normal +y); a comes down onto it from up and to the
+    // right, along the 45° line between their centres.
+    const n = Math.SQRT1_2;
+    const a = { x: n * TOUCH_M, y: n * TOUCH_M, vx: 0, vy: -1 };
+    const b = { x: 0, y: 0, vx: 0, vy: 0 };
+    resolveBallContact(a, b, n, n, 0.5, GRAVITY_DV, 0, 0, 0, 1);
+    // The floor takes b's downward share: b slides off to the left, flat.
+    expect(b.vy).toBe(0);
+    expect(b.vx).toBeLessThan(0);
+    // And the pair separates at e times the approach speed, along n.
+    const vn = (a.vx - b.vx) * n + (a.vy - b.vy) * n;
+    expect(vn).toBeCloseTo(0.5 * n, 12);
+    // The surface only pushes: pulled away from it, b moves freely.
+    const c = { x: 0, y: 0, vx: 0, vy: 0 };
+    const d = { x: n * TOUCH_M, y: -n * TOUCH_M, vx: 0, vy: 1 };
+    resolveBallContact(d, c, n, -n, 0.5, GRAVITY_DV, 0, 0, 0, 1);
+    expect(c.vy).toBeGreaterThan(0);
+  });
+
+  it('gives exactly the free impulse when no surface is given', () => {
+    const run = (withZeros: boolean) => {
+      const a = { x: 0, y: 0, vx: -1.3, vy: 0.2 };
+      const b = { x: -TOUCH_M, y: 0, vx: 0.4, vy: -0.1 };
+      if (withZeros) resolveBallContact(a, b, 1, 0, e, GRAVITY_DV, 0, 0, 0, 0);
+      else resolveBallContact(a, b, 1, 0, e, GRAVITY_DV);
+      return [a.vx, a.vy, b.vx, b.vy];
+    };
+    expect(run(true)).toEqual(run(false));
+    expect(run(false)[0]).toBeCloseTo(-1.3 + ((1 + e) * 1.7) / 2, 15);
+  });
+
   it('is perfectly inelastic below the resting threshold', () => {
     const slow = 0.9 * restingSpeedMps(e, GRAVITY_DV);
     const a = { x: 0, y: 0, vx: 0, vy: -slow };
@@ -222,6 +254,37 @@ describe('ball collisions in the world', () => {
     // Frictionless rolling down a 15° slope: about g·sin(15°)·t = 1.3 m/s after 0.5 s.
     for (const b of world.balls) expect(Math.hypot(b.vx, b.vy)).toBeGreaterThan(1);
     expect(minPairGapM(world)).toBeGreaterThanOrEqual(-CONTACT_SLOP_M);
+  });
+
+  it('roll a ball lying on another down a slope with it, without jamming', () => {
+    // The state that once jammed the classic board's out-hole floor: one
+    // ball rolling down the 15° floor, a second landing on its upper side.
+    // Resolving floor and ball contacts in turn ran both out of impacts
+    // every step, and they stopped for good.
+    // Recorded from a Monte Carlo run at power 0.2, seed 1 (balls 4270–4271).
+    const world = createBoardWorld(classic);
+    const lower = addBall(world, {
+      x: 0.33751140827174986,
+      y: 0.06407269175437895,
+      vx: -0.5519081402377676,
+      vy: -0.13519167207143715,
+    });
+    const upper = addBall(world, {
+      x: 0.3432766623725731,
+      y: 0.07378002989623397,
+      vx: -0.36951800002943497,
+      vy: -0.28477684764860883,
+    });
+    let touched = false;
+    for (let i = 0; i < steps(0.1); i++) {
+      stepWorld(world);
+      touched ||= minPairGapM(world) < 1e-6;
+      expect(minPairGapM(world)).toBeGreaterThanOrEqual(-CONTACT_SLOP_M);
+    }
+    expect(touched).toBe(true);
+    // Both still rolling downhill, faster than they started.
+    expect(lower.vx).toBeLessThan(-0.55);
+    expect(upper.vx).toBeLessThan(-0.37);
   });
 
   it('move balls that never touch exactly as with ball collisions off, near misses included', () => {
