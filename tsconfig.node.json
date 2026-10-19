@@ -1,0 +1,10 @@
+{
+  // Node-side code: tools, tests, and config files. DOM lib is included because
+  // Playwright tests pass callbacks that run in the page.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["tools", "tests", "*.config.ts"]
+}
