@@ -44,8 +44,15 @@ export const BALL_RADIUS_M = 0.0055;
 export const BALL_MASS_KG = 0.0055;
 /** Brass nail: about 2 mm diameter. */
 export const NAIL_RADIUS_M = 0.001;
-/** Fastest launch the handle can produce. Provisional until M2 tunes it against the real board. */
+/** Fastest launch the handle can produce. Confirmed against boards/classic.json in M2. */
 export const MAX_LAUNCH_SPEED_MPS = 5;
+/**
+ * Shot-to-shot spread of launch speed, as a fraction of the nominal speed
+ * (one standard deviation). The hammer spring never strikes twice exactly
+ * alike. Without it every shot at one power follows the same path. See
+ * PHYSICS.md ("Launch spread").
+ */
+export const LAUNCH_SPEED_SPREAD = 0.01;
 
 export const NAIL_MATERIAL: Material = Object.freeze({ restitution: 0.6, friction: 0.1 });
 export const RAIL_MATERIAL: Material = Object.freeze({ restitution: 0.4, friction: 0.05 });

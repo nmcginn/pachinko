@@ -7,7 +7,8 @@ import {
   parseBoard,
   pocketKind,
 } from '../../src/sim/board';
-import { MAX_LAUNCH_SPEED_MPS, NAIL_RADIUS_M } from '../../src/sim/world';
+import { type Rng, createRng } from '../../src/sim/rng';
+import { LAUNCH_SPEED_SPREAD, MAX_LAUNCH_SPEED_MPS, NAIL_RADIUS_M } from '../../src/sim/world';
 
 /** Smallest useful board: a bowl with an out-hole and a launcher above it. */
 function minimal(): Record<string, unknown> {
@@ -319,5 +320,62 @@ describe('launch', () => {
     expect([ball.x, ball.y]).toEqual([0.05, 0.15]);
     expect(ball.vx).toBeCloseTo(0, 12);
     expect(ball.vy).toBeCloseTo(MAX_LAUNCH_SPEED_MPS, 12);
+  });
+
+  describe('launch spread', () => {
+    const board = parseBoard(minimal());
+    const speedAt = (power: number, rng: Rng) => {
+      const world = createBoardWorld(board);
+      const ball = launchBall(world, board, power, rng);
+      return Math.hypot(ball.vx, ball.vy);
+    };
+
+    it('varies the speed shot to shot by LAUNCH_SPEED_SPREAD, around the nominal speed', () => {
+      expect(LAUNCH_SPEED_SPREAD).toBe(0.01);
+      const rng = createRng(4);
+      const nominal = launchSpeedMps(board.launcher, 0.5);
+      const n = 20_000;
+      let sum = 0;
+      let sumSq = 0;
+      for (let i = 0; i < n; i++) {
+        const rel = speedAt(0.5, rng) / nominal - 1;
+        sum += rel;
+        sumSq += rel * rel;
+      }
+      const mean = sum / n;
+      expect(Math.abs(mean)).toBeLessThan(0.0003);
+      expect(Math.sqrt(sumSq / n - mean * mean)).toBeCloseTo(LAUNCH_SPEED_SPREAD, 3);
+    });
+
+    it('draws once per shot from the rng, so the same seed gives the same speeds', () => {
+      const a = createRng(9);
+      const b = createRng(9);
+      for (let i = 0; i < 50; i++) expect(speedAt(0.3, a)).toBe(speedAt(0.3, b));
+      const c = createRng(9);
+      speedAt(0.3, c);
+      const d = createRng(9);
+      d.normal();
+      expect(c.state()).toEqual(d.state());
+    });
+
+    it('never exceeds MAX_LAUNCH_SPEED_MPS, even at full power', () => {
+      const rng = createRng(2);
+      let capped = 0;
+      for (let i = 0; i < 2000; i++) {
+        const v = speedAt(1, rng);
+        expect(v).toBeLessThanOrEqual(MAX_LAUNCH_SPEED_MPS + 1e-12);
+        if (v > MAX_LAUNCH_SPEED_MPS - 1e-9) capped++;
+      }
+      // About half of full-power draws land above the cap and are held to it.
+      expect(capped / 2000).toBeGreaterThan(0.4);
+      expect(capped / 2000).toBeLessThan(0.6);
+    });
+
+    it('keeps the launch direction', () => {
+      const world = createBoardWorld(board);
+      const ball = launchBall(world, board, 0.5, createRng(1));
+      expect(ball.vx).toBeCloseTo(0, 12);
+      expect(ball.vy).toBeGreaterThan(0);
+    });
   });
 });
