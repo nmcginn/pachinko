@@ -10,10 +10,11 @@ Stack: Vite + TypeScript (strict), Canvas 2D, Vitest for unit tests, Playwright 
 
 Agents: update this section at the end of every session.
 
-- Current milestone: M0 (every criterion implemented and passing locally; it's done once CI is green on the M0 PR and that PR is merged, then advance to M1)
-- Done in this milestone: Vite + TS strict, ESLint (with sim/game purity rules), Prettier, Vitest, Playwright, `tsx`; `npm run check`; GitHub Actions (`check` + e2e); Cloudflare Pages config (`wrangler.toml`, `.nvmrc`); full-height DPR-aware canvas with fixed-timestep loop and debug overlay; pause while hidden; PHYSICS.md; directory layout with stubs.
-- Next up: M1 physics core (`vec`, `collide`, `world`, `rng`, invariant tests). `src/sim/world.ts` already has `SIM_STEP_S` and a clock-only world to extend.
-- Last session: 2026-10-19: M0 bootstrap: tooling, CI, Pages config, canvas loop with debug overlay, stubs.
+- Current milestone: M1 (every criterion implemented and passing locally; it's done once CI is green on the M1 PR and that PR is merged, then advance to M2). M0 landed on master as 1954b62.
+- Done in this milestone: `vec`, `rng` (xoshiro128\*\* checked against the reference C output), `collide` (swept ball–nail and ball–rail with impulse response), `world` (fixed step, ball lifecycle, bounds removal, energy); all four invariant tests; the 10×10 grid acceptance scene (`tests/sim/invariants.test.ts`, scenes in `tests/sim/scenes.ts`). Constants and derivations in PHYSICS.md.
+- Next up: M2 board and launcher. Start with the board schema and validator in `src/sim/board.ts` producing `createCircle`/`createPolyline` shapes for `createWorld`; pockets are sensor regions the world doesn't have yet. `MAX_LAUNCH_SPEED_MPS` (5 m/s) is provisional until a ball is launched up the real guide rail. Nothing draws balls yet; `render/balls.ts` should interpolate, which needs the world to keep previous positions.
+- Heads-up for M3: the step runs about 310k ball-steps/s brute force over 110 shapes. 100k balls at a few seconds of flight each is around 5×10⁸ ball-steps, so the 60 s budget needs the broadphase (`src/sim/broadphase.ts`, still a stub) and probably more. Measure before tuning anything.
+- Last session: 2026-10-19: M1 physics core: vec, rng, swept collisions, world step, invariant tests, grid acceptance scene.
 - Open questions for the maintainer: —
 
 ---
