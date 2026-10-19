@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   MAX_FLIGHT_S,
+  TRAFFIC_BALLS,
   addTally,
   createTally,
   runBatch,
@@ -71,16 +72,39 @@ describe('montecarlo: runBatch', () => {
     expect(b.ballSteps).not.toBe(a.ballSteps);
   });
 
-  it('adds up the same however the run is split into batches, in any order', () => {
-    const whole = runBatch(classic, { power: 0.05, seed: 7, count: 120 });
-    const later = runBatch(classic, { power: 0.05, seed: 7, first: 50, count: 70 });
-    const earlier = runBatch(classic, { power: 0.05, seed: 7, first: 0, count: 50 });
-    expect(addTally(addTally(createTally(), later), earlier)).toEqual(whole);
-    const ones = createTally();
-    for (let i = 119; i >= 100; i--) {
-      addTally(ones, runBatch(classic, { power: 0.05, seed: 7, first: i, count: 1 }));
+  it('gives a batch the same tally whatever ran before it', () => {
+    // Batches run one after another in a worker; nothing may carry over.
+    const later = runBatch(classic, { power: 0.05, seed: 7, first: 50, count: 40 });
+    runBatch(classic, { power: 1, seed: 9, count: 60 });
+    expect(runBatch(classic, { power: 0.05, seed: 7, first: 50, count: 40 })).toEqual(later);
+  });
+
+  it('fires balls into one world at the auto-fire rate, so they meet', () => {
+    // The same balls fired far apart in time, one per batch, never meet; fired
+    // together, at least one collision changes some ball's flight.
+    const together = runBatch(classic, { power: 0, seed: 7, first: 0, count: 40 });
+    const apart = createTally();
+    for (let i = 0; i < 40; i++) {
+      // first: i with no traffic: each ball alone in its own world.
+      addTally(apart, runBatch(classic, { power: 0, seed: 7, first: i, count: 1, traffic: 0 }));
     }
-    expect(ones).toEqual(runBatch(classic, { power: 0.05, seed: 7, first: 100, count: 20 }));
+    expect(together.launched).toBe(apart.launched);
+    expect(together.ballSteps).not.toBe(apart.ballSteps);
+  });
+
+  it('fires TRAFFIC_BALLS uncounted balls before a batch, or as many as there are', () => {
+    expect(TRAFFIC_BALLS).toBe(10);
+    // With a flight limit far shorter than the auto-fire interval, every
+    // ball flies alone to the limit, so ballSteps counts the balls fired.
+    const limitS = 0.01;
+    const perBall = Math.ceil(limitS / SIM_STEP_S);
+    const at = (first: number) =>
+      runBatch(classic, { power: 0.5, seed: 1, first, count: 2, maxFlightS: limitS });
+    expect(at(0).ballSteps).toBe(2 * perBall);
+    expect(at(3).ballSteps).toBe((3 + 2) * perBall);
+    expect(at(500).ballSteps).toBe((TRAFFIC_BALLS + 2) * perBall);
+    // Only the batch's own balls are counted.
+    expect(at(500)).toMatchObject({ launched: 2, stuck: 2 });
   });
 
   it('runs zero balls', () => {
@@ -112,7 +136,8 @@ describe('montecarlo: runBatch', () => {
     const limitS = 0.01;
     const t = runBatch(classic, { power: 0.5, seed: 1, count: 4, maxFlightS: limitS });
     expect(t.stuck).toBe(4);
-    // Each ball was stepped exactly to the limit, alone: none carried over.
+    // Each ball was stepped exactly to the limit: the next isn't fired until
+    // 0.6 s later, and none carried over.
     expect(t.ballSteps).toBe(4 * Math.ceil(limitS / SIM_STEP_S));
   });
 
@@ -122,6 +147,9 @@ describe('montecarlo: runBatch', () => {
     }
     for (const count of [-1, 1.5, NaN]) {
       expect(() => runBatch(classic, { power: 0, seed: 1, count })).toThrow(RangeError);
+    }
+    for (const first of [-1, 0.5]) {
+      expect(() => runBatch(classic, { power: 0, seed: 1, first, count: 1 })).toThrow(RangeError);
     }
     for (const seed of [-1, 0.5, 2 ** 32]) {
       expect(() => runBatch(classic, { power: 0, seed, count: 1 })).toThrow(RangeError);

@@ -57,6 +57,18 @@ describe('fire control', () => {
     expect(shots).toEqual([0, 3000, 3000 + FIRE_INTERVAL_STEPS]);
   });
 
+  it('holds a due shot while the lane is blocked, fires the moment it clears, and counts on from there', () => {
+    const c = createFireControl();
+    c.held = true;
+    const shots: number[] = [];
+    // The lane is blocked for the first 50 steps: the first shot, due at
+    // step 0, waits until 50, and the interval runs from there.
+    for (let i = 0; i < 2 * FIRE_INTERVAL_STEPS + 100; i++) {
+      if (stepFire(c, !(i < 50))) shots.push(i);
+    }
+    expect(shots).toEqual([50, 50 + FIRE_INTERVAL_STEPS, 50 + 2 * FIRE_INTERVAL_STEPS]);
+  });
+
   it('starts at mid power and clamps power to [0, 1]', () => {
     const c = createFireControl();
     expect(c.power).toBe(DEFAULT_POWER);

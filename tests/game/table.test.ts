@@ -5,7 +5,7 @@ import { FIRE_INTERVAL_STEPS } from '../../src/game/fire';
 import { ROUNDS, attackerOpen, forceJackpot } from '../../src/game/machine';
 import { createTable, stepTable } from '../../src/game/table';
 import { parseBoard } from '../../src/sim/board';
-import { SIM_STEP_S } from '../../src/sim/world';
+import { SIM_STEP_S, addBall } from '../../src/sim/world';
 
 const classic = parseBoard(JSON.parse(readFileSync('boards/classic.json', 'utf8')));
 const steps = (simS: number) => Math.round(simS / SIM_STEP_S);
@@ -61,6 +61,26 @@ describe('table', () => {
     expect(table.economy.launched).toBeGreaterThan(3);
     expect(table.economy.entries.foul).toBe(table.economy.launched - table.world.balls.length);
     expect(table.economy.balls + table.world.balls.length).toBe(3);
+  });
+
+  it('holds a shot while a ball sits at the launch point, then fires', () => {
+    // Balls collide (M5), so a ball can't appear on top of another. In play
+    // a foul clears the launch point well within the 0.6 s between shots;
+    // here a ball is put there by hand.
+    const table = createTable(classic);
+    const { x, y } = classic.launcher;
+    addBall(table.world, { x, y });
+    table.fire.held = true;
+    stepTable(table);
+    expect(table.economy.launched).toBe(0);
+    let waited = 1;
+    while (table.economy.launched === 0 && waited < 1000) {
+      stepTable(table);
+      waited += 1;
+    }
+    expect(table.economy.launched).toBe(1);
+    expect(table.economy.balls).toBe(249);
+    expect(waited).toBeGreaterThan(1);
   });
 
   it('does nothing with zero balls but advance the world', () => {
