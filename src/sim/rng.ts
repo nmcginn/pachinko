@@ -9,6 +9,13 @@ export interface Rng {
   next(): number;
   /** Uniform float in [min, max). */
   range(min: number, max: number): number;
+  /**
+   * Approximately standard normal (mean 0, variance 1): the sum of 12
+   * uniforms, minus 6. Bounded to [-6, 6], and built from additions only, so
+   * it is bit-for-bit the same on every engine (Box–Muller would need
+   * Math.log and Math.cos, whose last bits vary between engines).
+   */
+  normal(): number;
   /** Copy of the internal state, for snapshots and tests. */
   state(): [number, number, number, number];
 }
@@ -43,6 +50,25 @@ export function createRng(seed: number): Rng {
   return createRngFromState([mix(), mix(), mix(), mix()]);
 }
 
+/**
+ * Seed for one independent stream of a run: stream `i` of seed `s`. The
+ * Monte Carlo runner gives every ball its own stream, so a ball's draws
+ * depend only on the run's seed and the ball's index, never on how the run
+ * was split across workers. Both inputs must be integers in [0, 2^32).
+ */
+export function streamSeed(seed: number, stream: number): number {
+  for (const [name, v] of [
+    ['seed', seed],
+    ['stream', stream],
+  ] as const) {
+    if (!Number.isInteger(v) || v < 0 || v >= U32) {
+      throw new RangeError(`rng ${name} must be an integer in [0, 2^32), got ${v}`);
+    }
+  }
+  // Two rounds of splitmix32 mixing: one for the stream, one combining it with the seed.
+  return splitmix32((seed ^ splitmix32(stream)()) >>> 0)();
+}
+
 /** Build a generator from an explicit xoshiro128 state. The state must not be all zero. */
 export function createRngFromState(init: readonly [number, number, number, number]): Rng {
   if (init.some((w) => !Number.isInteger(w) || w < 0 || w >= U32)) {
@@ -67,10 +93,17 @@ export function createRngFromState(init: readonly [number, number, number, numbe
 
   const next = (): number => nextU32() / U32;
 
+  const normal = (): number => {
+    let sum = 0;
+    for (let i = 0; i < 12; i++) sum += next();
+    return sum - 6;
+  };
+
   return {
     nextU32,
     next,
     range: (min, max) => min + (max - min) * next(),
+    normal,
     state: () => [s0, s1, s2, s3],
   };
 }
