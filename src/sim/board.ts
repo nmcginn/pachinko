@@ -35,6 +35,7 @@ import {
   RAIL_MATERIAL,
   addBall,
   createWorld,
+  overlapsBall,
 } from './world';
 
 /**
@@ -348,7 +349,8 @@ const BOUNDS_MARGIN_M = 0.05;
 
 /**
  * Build the sim world for a board: nails, rails, pockets as sensors, bounds,
- * and a gate for each attacker's lid, closed, with the pocket's id.
+ * and a gate for each attacker's lid, closed, with the pocket's id. Balls
+ * collide with each other (M5).
  */
 export function createBoardWorld(board: Board): World {
   return createWorld({
@@ -358,6 +360,7 @@ export function createBoardWorld(board: Board): World {
     gates: board.pockets.flatMap((p) =>
       p.lid ? [{ id: p.id, segments: createPolyline(p.lid, RAIL_MATERIAL), sensorId: p.id }] : [],
     ),
+    ballCollisions: true,
     bounds: {
       minX: -BOUNDS_MARGIN_M,
       minY: -BOUNDS_MARGIN_M,
@@ -379,6 +382,15 @@ export function pocketKind(board: Board, sensorId: string): PocketKind | null {
 export function launchSpeedMps(launcher: Launcher, power: number): number {
   const p = power >= 0 ? Math.min(power, 1) : 0;
   return launcher.minSpeedMps + p * (MAX_LAUNCH_SPEED_MPS - launcher.minSpeedMps);
+}
+
+/**
+ * Whether a ball can be launched now: no ball sits at the launch point.
+ * Nails and rails can't: parseBoard checks the launch point is clear of
+ * them, with every lid closed, and opening a lid only takes a rail away.
+ */
+export function launcherClear(world: World, board: Board): boolean {
+  return !overlapsBall(world, board.launcher.x, board.launcher.y);
 }
 
 /**

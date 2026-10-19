@@ -1,4 +1,4 @@
-// Ball vs circle (nails) and ball vs segment (rails), M1. Ball vs ball lands in M5.
+// Ball vs circle (nails) and ball vs segment (rails), M1; ball vs ball, M5.
 //
 // Collisions are swept, not overlap-and-push: each test takes the ball's
 // motion for the rest of the step and returns the earliest time of impact.
@@ -323,4 +323,35 @@ export function resolveContact(
   const vnAfter = -e * vn;
   ball.vx = tx * keep + vnAfter * nx;
   ball.vy = ty * keep + vnAfter * ny;
+}
+
+/**
+ * Apply the contact impulse between two balls of equal mass, for unit
+ * normal (nx, ny) pointing from b toward a. Does nothing if they are
+ * separating.
+ *
+ * Normal restitution only: the contact is frictionless (PHYSICS.md, "Ball
+ * against ball"). Below the resting threshold on their approach speed the
+ * impact is perfectly inelastic, so a ball lying on another one sits still
+ * instead of bouncing every step, as on a rail. Momentum is conserved, and
+ * kinetic energy falls by (1 − e²)·vn²/4 per unit mass, so the pair never
+ * gains energy.
+ */
+export function resolveBallContact(
+  a: BallState,
+  b: BallState,
+  nx: number,
+  ny: number,
+  restitution: number,
+  gravityDvMps: number,
+): void {
+  const vn = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+  if (vn >= 0) return;
+  const e = -vn < restingSpeedMps(restitution, gravityDvMps) ? 0 : restitution;
+  // Each ball takes half the change in relative normal speed.
+  const j = (-(1 + e) * vn) / 2;
+  a.vx += j * nx;
+  a.vy += j * ny;
+  b.vx -= j * nx;
+  b.vy -= j * ny;
 }
