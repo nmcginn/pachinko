@@ -17,6 +17,7 @@ import {
   type Ball,
   type World,
   BALL_RADIUS_M,
+  NAIL_RADIUS_M,
   SIM_STEP_S,
   addBall,
   ballEnergyJ,
@@ -110,14 +111,42 @@ describe('boards/classic.json', () => {
     expect(laneEndY).toBeLessThan(railTopY - 0.04);
   });
 
-  it('passes validation, with the parts M2 asks for', () => {
+  it('passes validation, with the parts M2 and M4 ask for', () => {
     expect(classic.name).toBe('classic');
     expect(classic.nails.length).toBeGreaterThan(100);
     const ids = classic.rails.map((r) => r.id);
-    for (const id of ['outer', 'inner', 'floor-left', 'floor-right', 'start-cup']) {
+    for (const id of ['outer', 'inner', 'floor-left', 'floor-right', 'start-cup', 'attacker-box']) {
       expect(ids).toContain(id);
     }
-    expect(classic.pockets.map((p) => p.kind).sort()).toEqual(['foul', 'out', 'start']);
+    expect(classic.pockets.map((p) => p.kind).sort()).toEqual(['attacker', 'foul', 'out', 'start']);
+  });
+
+  it("puts the attacker below the start cup, a ball's width clear of every nail, lid shut", () => {
+    const attacker = classic.pockets.find((p) => p.kind === 'attacker');
+    const cup = classic.rails.find((r) => r.id === 'start-cup');
+    if (!attacker?.lid || !cup) throw new Error('classic board has no attacker or start cup');
+    const top = Math.max(...attacker.lid.map((p) => p.y));
+    expect(top).toBeLessThan(Math.min(...cup.points.map((p) => p.y)) - 2 * BALL_RADIUS_M);
+    // Lid and box: no nail close enough to trap a ball against them.
+    const box = classic.rails.find((r) => r.id === 'attacker-box');
+    const segs = [attacker.lid, box?.points ?? []].flatMap((pts) =>
+      pts.slice(1).map((b, i) => [pts[i], b] as const),
+    );
+    for (const n of classic.nails) {
+      for (const [a, b] of segs) {
+        if (!a) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const t = Math.max(
+          0,
+          Math.min(1, ((n.x - a.x) * dx + (n.y - a.y) * dy) / (dx * dx + dy * dy)),
+        );
+        const gap = Math.hypot(n.x - (a.x + t * dx), n.y - (a.y + t * dy)) - NAIL_RADIUS_M;
+        expect(gap).toBeGreaterThan(2 * BALL_RADIUS_M);
+      }
+    }
+    const world = createBoardWorld(classic);
+    expect(world.gates).toEqual([expect.objectContaining({ id: attacker.id, open: false })]);
   });
 });
 

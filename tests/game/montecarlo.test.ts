@@ -38,10 +38,24 @@ const open = parseBoard({
 describe('montecarlo: runBatch', () => {
   it('accounts for every ball launched', () => {
     const t = runBatch(classic, { power: 0, seed: 1, count: 200 });
-    const { start, out, foul } = t.entries;
+    const { start, out, foul, attacker } = t.entries;
     expect(t.launched).toBe(200);
+    expect(attacker).toBe(0); // The gate stays closed.
     expect(start + out + foul + t.lost + t.stuck).toBe(200);
     expect(t.ballSteps).toBeGreaterThan(200);
+  });
+
+  it('with the gates held open, catches balls in the attacker and changes nothing above it', () => {
+    const closed = runBatch(classic, { power: 0, seed: 1, count: 300 });
+    const opened = runBatch(classic, { power: 0, seed: 1, count: 300, gatesOpen: true });
+    const { start, out, foul, attacker } = opened.entries;
+    expect(start + out + foul + attacker + opened.lost + opened.stuck).toBe(300);
+    // About 29% at power 0 (PHYSICS.md, "Attacker"): 87 expected, s.d. 8.
+    expect(attacker).toBeGreaterThan(50);
+    expect(summarize(opened).attackerRate).toBe(attacker / 300);
+    // The attacker sits below the start pocket, so no ball's start entry depends on it.
+    expect(start).toBe(closed.entries.start);
+    expect(out).toBe(closed.entries.out - attacker);
   });
 
   it('gives the same tally for the same seed', () => {
@@ -137,6 +151,7 @@ describe('montecarlo: summarize', () => {
       startRate: 0,
       outRate: 0,
       foulRate: 0,
+      attackerRate: 0,
       spinsPer1000Yen: 0,
       spinsPer1000YenSe: 0,
     });

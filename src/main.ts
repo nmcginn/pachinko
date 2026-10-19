@@ -64,7 +64,7 @@ const loop = createLoop(
   {
     step: () => stepTable(table),
     render: (frame) => {
-      const bv = drawBoard(view, table.board);
+      const bv = drawBoard(view, table.board, table.world.gates);
       drawBalls(view, bv, table.world.balls, frame.alpha);
       hud.update(table.economy, table.fire, table.world.balls.length);
       overlay.update(frame, table.world);

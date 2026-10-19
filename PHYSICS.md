@@ -95,6 +95,14 @@ Candidate lists are in ascending shape index, the order the brute-force pass use
 
 Pockets are polygons with no physical response; their walls, where they have them, are ordinary rails. A ball is captured when its centre enters one, tested against each straight piece of its path through the step (between impacts), so a fast ball can't skip a thin pocket. A pocket reached before the next impact wins over the impact. The ball is stopped at the point of entry and removed.
 
+### Gates: the attacker's lid (M4)
+
+The attacker is a pocket whose mouth a lid closes over. The lid is a polyline of ordinary rail segments (rail material) that the world can switch off: while the gate is open, the step skips those segments, so balls fall through into the pocket; while it is closed, they are rails like any other. The broadphase indexes them either way, and skipping is a per-segment flag, so results stay identical with and without it (tested). Opening and closing are input to the sim, like a launch: only `setGateOpen` does it, and the game calls it on the step a round opens or ends.
+
+Closing can't push a ball out of the way: nothing in the sim ever pushes a ball out of geometry (see "Collision model"). A ball the closing lid would overlap is one already in the mouth, falling in, so it is taken by the pocket, as if it had dropped in a moment sooner. The game pays it like any attacker entry but doesn't count it toward the round (an over-entry, オーバー入賞, which real machines pay too). A ball resting on the closed lid, or touching it within the contact slop, is not in the mouth and stays put.
+
+The closed lid on the classic board is a shallow roof, 6 mm high over its 90 mm span (about 7.6°), not a flat plate: a flat lid is a ledge a ball can come to rest on for ever (the sim rests a ball exactly on a flat surface; see "Friction"), and every ball stranded there would count as stuck. On the roof, gravity along the slope is about 1.3 m/s², so a ball always rolls off. A ball dropped exactly on the apex with no sideways speed would balance there, the same knife-edge as the nail crest under the start cup (M3 tuning); the Monte Carlo found none in 410 000 balls with the lid shut (the 21-power sweep and the two 100k runs in the tuning log), and CI fails on any stuck ball.
+
 ### Energy and the resting threshold
 
 The step is semi-implicit Euler: v' = v − g·dt, then y' = y + v'·dt. In free flight this loses exactly ½g²dt² per unit mass each step, so with drag on top, energy strictly decreases (checked by test).
@@ -134,7 +142,7 @@ The ball rolls on the backboard under the normal component of gravity, g·sin 3�
 
 ## Assumptions
 
-- The frame loop discards wall time beyond 0.1 s per frame instead of catching up. Sim time is therefore not wall time after a stall. Nothing depends on wall time yet; if anything ever does (the 30 s jackpot round timeout in M4 should use sim time, not wall time), it should count sim steps.
+- The frame loop discards wall time beyond 0.1 s per frame instead of catching up. Sim time is therefore not wall time after a stall. Nothing depends on wall time: the reel's spin, the jackpot rounds' 30 s timeout, and the pause between rounds (M4) all count sim steps (`src/game/machine.ts`), so a stall pauses them along with the balls.
 - Ball spin is not modelled. Friction's effect on spin is approximated by the 2/7 cap and by frictionless rolling contact (see "Friction"). If ball behaviour on rails looks wrong in M2, spin is the first suspect.
 - A ball is never placed inside geometry: `addBall` refuses it, since nothing ever pushes a ball out of a shape.
 - Collision response treats nails and rails as fixed (infinite mass). Nails don't flex.
@@ -186,3 +194,23 @@ Monte Carlo, `--balls 10000 --sweep 0:1:0.05 --seed 1`, spins per ¥1000:
 ¹ From `--balls 100000 --power 0.62 --seed 1`.
 
 At the best power, `--board classic --balls 100000 --power 0 --seed 1`: 21.28 ± 0.22 spins per ¥1000 (8.51% start, 91.49% out, no fouls, none stuck). Before (M2 geometry, same command): 7.85 ± 0.44 at 10k balls. The best power is 0, the bottom of the handle; see "Launch speed range" for why only the weakest shots play the middle of the field, and PLAN.md's open questions.
+
+### 2026-10-19: the attacker (M4)
+
+New geometry, no physics constant changed and no nail moved: M4 asks for an attacker gate in the board. `boards/classic.json` gains the `attacker-box` rail (an open-topped box 90 mm wide and 15 mm deep, x 0.205–0.295 m, top at y = 0.1 m, centred under the start cup above the out-hole) and the `attacker` pocket inside it, with a roof-shaped lid (apex 6 mm above the box top) that is closed except during a jackpot round. See "Gates: the attacker's lid".
+
+Why there and that wide. Real attackers sit low and central, under the start pocket. Here that is the only open space under the field: between the lowest nail row (y = 0.122 m) and the floor. A ball's width is clear between the box and every nail (tested). The width sets how fast a round fills: at the auto-fire rate (100 a minute) a round of 10 balls fills before its 30 s timeout only if the attacker takes more than about 1 ball in 5. Measured with the gate held open, at power 0, 10k balls, seed 1: a 56 mm box took 16.3%, 76 mm 26.1%, 90 mm 29.0%. At 90 mm a round at power 0 fills in about 21 s, so rounds end by count when aimed well and by timeout otherwise (power 0.1 and up take 4–18%). It is as wide as the space allows without moving nails. How generous a jackpot should be is a balance question for the maintainer (PLAN.md open questions).
+
+Monte Carlo, gate closed (normal play), same seed: identical to the ball. The attacker sits below the start pocket, so no ball that reaches it can come back up to the start pocket; only flight times change.
+
+| `--balls 100000 --seed 1`        | Before (master)            | After                      |
+| -------------------------------- | -------------------------- | -------------------------- |
+| `--power 0.62`                   | 2.33 ± 0.08 (933 starts)   | 2.33 ± 0.08 (933 starts)   |
+| `--power 0` (best)               | 21.28 ± 0.22 (8514 starts) | 21.28 ± 0.22 (8514 starts) |
+| stuck, `--sweep 0:1:0.05` at 10k | 0                          | 0                          |
+
+With the gate held open (`--open`, new in M4), `--balls 100000 --power 0 --seed 1`: 8.51% start, 28.78% attacker, 62.71% out. 10k-ball sweep, gate open, seed 1:
+
+| Power    | 0     | 0.1   | 0.2   | 0.3   | 0.4   | 0.5   | 0.6  | 0.7   | 0.8   | 0.9   | 1    |
+| -------- | ----- | ----- | ----- | ----- | ----- | ----- | ---- | ----- | ----- | ----- | ---- |
+| Attacker | 29.0% | 17.6% | 14.0% | 10.2% | 11.2% | 10.3% | 8.7% | 11.7% | 11.3% | 11.5% | 4.4% |

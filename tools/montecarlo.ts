@@ -30,6 +30,7 @@ const USAGE = `Usage: npx tsx tools/montecarlo.ts [options]
 
 Launch balls on a board headlessly and print start-pocket rate, out rate,
 and spins per ¥1000 (start-pocket entries per 250 balls launched).
+Gates (the attacker) stay closed, as in normal play, unless --open.
 
 Options:
   --board <name>         Board in boards/<name>.json (default: classic)
@@ -38,6 +39,8 @@ Options:
   --sweep <from:to:step> Run every power from..to in steps, print a table,
                          and mark the best. Replaces --power.
   --seed <n>             RNG seed, an integer in [0, 2^32) (default: 1)
+  --open                 Hold every gate (the attacker) open for the whole
+                         run, to measure what it catches in a jackpot round
   --workers <n>          Worker threads (default: one per CPU, up to 8).
                          Changes speed only, never results.
   --json                 Print results as JSON instead of text
@@ -52,6 +55,7 @@ const BATCH_BALLS = 1000;
 interface Job {
   readonly power: number;
   readonly seed: number;
+  readonly gatesOpen: boolean;
   readonly first: number;
   readonly count: number;
 }
@@ -163,10 +167,10 @@ class Pool {
   }
 }
 
-function jobsFor(power: number, seed: number, balls: number): Job[] {
+function jobsFor(power: number, seed: number, balls: number, gatesOpen: boolean): Job[] {
   const jobs: Job[] = [];
   for (let first = 0; first < balls; first += BATCH_BALLS) {
-    jobs.push({ power, seed, first, count: Math.min(BATCH_BALLS, balls - first) });
+    jobs.push({ power, seed, gatesOpen, first, count: Math.min(BATCH_BALLS, balls - first) });
   }
   return jobs;
 }
@@ -190,12 +194,16 @@ function row(power: number, tally: Tally): Row {
 
 const pct = (r: number) => `${(100 * r).toFixed(2)}%`;
 
-function printRun(name: string, seed: number, r: Row): void {
+function printRun(name: string, seed: number, gatesOpen: boolean, r: Row): void {
   const n = r.launched;
-  console.log(`board ${name}, power ${r.power}, ${n} balls, seed ${seed}`);
+  const gates = gatesOpen ? ', gates open' : '';
+  console.log(`board ${name}, power ${r.power}, ${n} balls, seed ${seed}${gates}`);
   console.log(`  start pocket     ${pct(r.startRate).padStart(7)}  (${r.entries.start})`);
   console.log(`  out-hole         ${pct(r.outRate).padStart(7)}  (${r.entries.out})`);
   console.log(`  foul             ${pct(r.foulRate).padStart(7)}  (${r.entries.foul})`);
+  if (gatesOpen) {
+    console.log(`  attacker         ${pct(r.attackerRate).padStart(7)}  (${r.entries.attacker})`);
+  }
   if (r.lost > 0) console.log(`  left the board            (${r.lost})`);
   if (r.stuck > 0) console.log(`  stuck in play             (${r.stuck})`);
   console.log(
@@ -203,14 +211,24 @@ function printRun(name: string, seed: number, r: Row): void {
   );
 }
 
-function printSweep(name: string, seed: number, balls: number, rows: readonly Row[], best: Row) {
-  console.log(`board ${name}, ${balls} balls per power, seed ${seed}`);
-  console.log('  power   start     out    foul  stuck  spins/¥1000');
+function printSweep(
+  name: string,
+  seed: number,
+  balls: number,
+  gatesOpen: boolean,
+  rows: readonly Row[],
+  best: Row,
+) {
+  const gates = gatesOpen ? ', gates open' : '';
+  console.log(`board ${name}, ${balls} balls per power, seed ${seed}${gates}`);
+  const attackerHead = gatesOpen ? ' attacker' : '';
+  console.log(`  power   start     out    foul${attackerHead}  stuck  spins/¥1000`);
   for (const r of rows) {
     const mark = r === best ? '  ← best' : '';
+    const attacker = gatesOpen ? ` ${pct(r.attackerRate).padStart(8)}` : '';
     console.log(
       `  ${r.power.toFixed(3)} ${pct(r.startRate).padStart(7)} ${pct(r.outRate).padStart(7)} ` +
-        `${pct(r.foulRate).padStart(7)} ${String(r.stuck).padStart(6)}  ` +
+        `${pct(r.foulRate).padStart(7)}${attacker} ${String(r.stuck).padStart(6)}  ` +
         `${r.spinsPer1000Yen.toFixed(2).padStart(6)} ± ${r.spinsPer1000YenSe.toFixed(2)}${mark}`,
     );
   }
@@ -227,6 +245,7 @@ async function main(): Promise<void> {
         sweep: { type: 'string' },
         seed: { type: 'string', default: '1' },
         workers: { type: 'string' },
+        open: { type: 'boolean', default: false },
         json: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
@@ -256,7 +275,8 @@ async function main(): Promise<void> {
     // In-process: same code path the workers run, without threads.
     for (const power of powers) {
       const total = createTally();
-      for (const job of jobsFor(power, seed, balls)) addTally(total, runBatch(board, job));
+      for (const job of jobsFor(power, seed, balls, values.open))
+        addTally(total, runBatch(board, job));
       rows.push(row(power, total));
       ballSteps += total.ballSteps;
     }
@@ -264,7 +284,7 @@ async function main(): Promise<void> {
     const pool = new Pool(data, workers);
     try {
       for (const power of powers) {
-        const total = await pool.run(jobsFor(power, seed, balls));
+        const total = await pool.run(jobsFor(power, seed, balls, values.open));
         rows.push(row(power, total));
         ballSteps += total.ballSteps;
       }
@@ -278,14 +298,26 @@ async function main(): Promise<void> {
     // Highest rate wins; ties go to the lower power.
     const best = rows.reduce((a, b) => (b.spinsPer1000Yen > a.spinsPer1000Yen ? b : a));
     if (values.json) {
-      console.log(JSON.stringify({ board: board.name, seed, balls, rows, best: best.power }));
+      console.log(
+        JSON.stringify({
+          board: board.name,
+          seed,
+          gatesOpen: values.open,
+          balls,
+          rows,
+          best: best.power,
+        }),
+      );
     } else {
-      printSweep(board.name, seed, balls, rows, best);
+      printSweep(board.name, seed, balls, values.open, rows, best);
     }
   } else {
     const r = rows[0] as Row;
-    if (values.json) console.log(JSON.stringify({ board: board.name, seed, ...r }));
-    else printRun(board.name, seed, r);
+    if (values.json) {
+      console.log(JSON.stringify({ board: board.name, seed, gatesOpen: values.open, ...r }));
+    } else {
+      printRun(board.name, seed, values.open, r);
+    }
   }
   const rate = seconds > 0 ? ballSteps / seconds / 1e6 : 0;
   console.error(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ATTACKER_PAYOUT,
   START_POCKET_PAYOUT,
   STARTING_BALLS,
   createEconomy,
@@ -13,7 +14,7 @@ describe('economy', () => {
     expect(createEconomy()).toEqual({
       balls: 250,
       launched: 0,
-      entries: { start: 0, out: 0, foul: 0 },
+      entries: { start: 0, out: 0, foul: 0, attacker: 0 },
       paidOut: 0,
     });
   });
@@ -38,7 +39,7 @@ describe('economy', () => {
     const e = createEconomy(10);
     recordEntry(e, 'out');
     recordEntry(e, 'out');
-    expect(e.entries).toEqual({ start: 0, out: 2, foul: 0 });
+    expect(e.entries).toEqual({ start: 0, out: 2, foul: 0, attacker: 0 });
     expect(e).toMatchObject({ balls: 10, paidOut: 0 });
   });
 
@@ -50,6 +51,14 @@ describe('economy', () => {
     expect(e).toMatchObject({ balls: 3, launched: 1, paidOut: 3, entries: { start: 1 } });
     recordEntry(e, 'start');
     expect(e).toMatchObject({ balls: 6, paidOut: 6, entries: { start: 2 } });
+  });
+
+  it('pays 15 balls into the tray for each attacker entry', () => {
+    expect(ATTACKER_PAYOUT).toBe(15);
+    const e = createEconomy(0);
+    recordEntry(e, 'attacker');
+    recordEntry(e, 'attacker');
+    expect(e).toMatchObject({ balls: 30, paidOut: 30, entries: { attacker: 2, start: 0 } });
   });
 
   it('pays out into an empty tray, and the paid balls can be launched', () => {

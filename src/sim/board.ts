@@ -9,11 +9,14 @@
 //     "nails": [[x, y], …],                         // brass nails, NAIL_RADIUS_M each
 //     "rails": [{ "id": "outer", "points": [[x, y], …] }, …],   // polylines
 //     "pockets": [{ "id": "start", "kind": "start", "polygon": [[x, y], …] }, …],
+//                                                   // an "attacker" also has a "lid": [[x, y], …]
 //     "launcher": { "x": …, "y": …, "angleDeg": …, "minSpeedMps": … }
 //   }
 //
 // Pockets are sensor regions: a ball whose centre enters one leaves play.
-// Their physical walls, if any, are rails. `parseBoard` checks everything it
+// Their physical walls, if any, are rails. An attacker's lid is a polyline
+// that closes over its mouth: the world makes it a gate, closed at the start,
+// and the game opens it for jackpot rounds (M4). `parseBoard` checks everything it
 // can about the data up front and reports every problem it finds at once,
 // each with the path of the offending item, so a hand-edited board fails
 // loudly at load time rather than as a ball doing something odd.
@@ -40,8 +43,10 @@ import {
  * - `foul`: the bottom of the launch lane, for a shot too weak to reach the
  *   field. The ball goes back to the tray (PLAN.md game rules); the sim only
  *   reports the capture and the economy returns the ball.
+ * - `attacker`: the attacker (アタッカー), the big pocket that opens for
+ *   jackpot rounds. Has a lid, closed except during a round (M4).
  */
-export const POCKET_KINDS = ['start', 'out', 'foul'] as const;
+export const POCKET_KINDS = ['start', 'out', 'foul', 'attacker'] as const;
 export type PocketKind = (typeof POCKET_KINDS)[number];
 
 export interface Rail {
@@ -53,6 +58,8 @@ export interface Pocket {
   readonly id: string;
   readonly kind: PocketKind;
   readonly polygon: readonly Vec2[];
+  /** Attackers only: the lid over the mouth, a polyline. Solid while the gate is closed. */
+  readonly lid?: readonly Vec2[];
 }
 
 export interface Launcher {
@@ -168,7 +175,8 @@ const fmt = (p: Vec2) => `(${p.x}, ${p.y})`;
  * problem found. Checks shape and types, that all geometry lies on the board,
  * that nails don't overlap, rails have distinct consecutive points, pockets
  * are simple polygons, ids are unique, there is an out-hole for balls to
- * leave by, and the launcher sits clear of geometry with a usable speed range.
+ * leave by, attackers (and only attackers) have a lid, and the launcher
+ * sits clear of geometry with a usable speed range.
  */
 export function parseBoard(data: unknown): Board {
   const c = new Checker();
@@ -214,6 +222,26 @@ export function parseBoard(data: unknown): Board {
     }
   }
 
+  /** A rail or lid: at least 2 points, all on the board, no point repeating the one before. */
+  const polyline = (v: unknown, path: string, what: 'rail' | 'lid'): Vec2[] | null => {
+    const points = c.points(v, path);
+    if (!points) return null;
+    if (points.length < 2) {
+      c.fail(path, `a ${what} needs at least 2 points, got ${points.length}`);
+      return null;
+    }
+    let ok = true;
+    points.forEach((p, k) => {
+      onBoard(p, `${path}[${k}]`);
+      const prev = points[k - 1];
+      if (prev && prev.x === p.x && prev.y === p.y) {
+        c.fail(`${path}[${k}]`, `repeats the previous point ${fmt(p)}`);
+        ok = false;
+      }
+    });
+    return ok ? points : null;
+  };
+
   // Rails.
   const rails: Rail[] = [];
   const railIds = new Set<string>();
@@ -226,20 +254,8 @@ export function parseBoard(data: unknown): Board {
       if (railIds.has(id)) c.fail(`${path}.id`, `duplicate rail id "${id}"`);
       railIds.add(id);
     }
-    const points = c.points(r['points'], `${path}.points`);
-    if (!points) return;
-    if (points.length < 2) {
-      c.fail(`${path}.points`, `a rail needs at least 2 points, got ${points.length}`);
-      return;
-    }
-    points.forEach((p, k) => {
-      onBoard(p, `${path}.points[${k}]`);
-      const prev = points[k - 1];
-      if (prev && prev.x === p.x && prev.y === p.y) {
-        c.fail(`${path}.points[${k}]`, `repeats the previous point ${fmt(p)}`);
-      }
-    });
-    if (id !== null) rails.push({ id, points });
+    const points = polyline(r['points'], `${path}.points`, 'rail');
+    if (points && id !== null) rails.push({ id, points });
   });
 
   // Pockets.
@@ -247,7 +263,7 @@ export function parseBoard(data: unknown): Board {
   const pocketIds = new Set<string>();
   c.array(root['pockets'], 'pockets')?.forEach((v, i) => {
     const path = `pockets[${i}]`;
-    const o = c.object(v, path, ['id', 'kind', 'polygon']);
+    const o = c.object(v, path, ['id', 'kind', 'polygon', 'lid']);
     if (!o) return;
     const id = c.string(o['id'], `${path}.id`);
     if (id !== null) {
@@ -259,13 +275,25 @@ export function parseBoard(data: unknown): Board {
     if (!validKind) {
       c.fail(`${path}.kind`, `must be one of ${POCKET_KINDS.join(', ')}, got ${String(kind)}`);
     }
+    let lid: Vec2[] | null = null;
+    let lidOk = true;
+    if (kind === 'attacker' && o['lid'] === undefined) {
+      c.fail(`${path}.lid`, 'an attacker needs a lid, the polyline that closes over its mouth');
+      lidOk = false;
+    } else if (validKind && kind !== 'attacker' && o['lid'] !== undefined) {
+      c.fail(`${path}.lid`, `only attacker pockets have a lid, not "${String(kind)}"`);
+      lidOk = false;
+    } else if (o['lid'] !== undefined) {
+      lid = polyline(o['lid'], `${path}.lid`, 'lid');
+      lidOk = lid !== null;
+    }
     const polygon = c.points(o['polygon'], `${path}.polygon`);
     if (!polygon) return;
     polygon.forEach((p, k) => onBoard(p, `${path}.polygon[${k}]`));
     const problem = polygonProblem(polygon);
     if (problem) c.fail(`${path}.polygon`, problem);
-    if (id !== null && validKind && !problem) {
-      pockets.push({ id, kind: kind as PocketKind, polygon });
+    if (id !== null && validKind && !problem && lidOk) {
+      pockets.push({ id, kind: kind as PocketKind, polygon, ...(lid ? { lid } : {}) });
     }
   });
   if (Array.isArray(root['pockets']) && !pockets.some((p) => p.kind === 'out')) {
@@ -318,12 +346,18 @@ export function parseBoard(data: unknown): Board {
  */
 const BOUNDS_MARGIN_M = 0.05;
 
-/** Build the sim world for a board: nails, rails, pockets as sensors, and bounds. */
+/**
+ * Build the sim world for a board: nails, rails, pockets as sensors, bounds,
+ * and a gate for each attacker's lid, closed, with the pocket's id.
+ */
 export function createBoardWorld(board: Board): World {
   return createWorld({
     circles: board.nails.map((p) => createCircle(p, NAIL_RADIUS_M, NAIL_MATERIAL)),
     segments: board.rails.flatMap((r) => createPolyline(r.points, RAIL_MATERIAL)),
     sensors: board.pockets.map((p) => createSensor(p.id, p.polygon)),
+    gates: board.pockets.flatMap((p) =>
+      p.lid ? [{ id: p.id, segments: createPolyline(p.lid, RAIL_MATERIAL), sensorId: p.id }] : [],
+    ),
     bounds: {
       minX: -BOUNDS_MARGIN_M,
       minY: -BOUNDS_MARGIN_M,
