@@ -191,8 +191,8 @@ describe('montecarlo: tulips', { timeout: 60_000 }, () => {
     const closed = run('closed', 1000);
     const o = summarize(open).tulips[0] as TulipSummary;
     const c = summarize(closed).tulips[0] as TulipSummary;
-    // About 9.5% open and 1.4% closed (PHYSICS.md, "Gates: tulips"):
-    // with 1000 balls, about 95 and 14 entries.
+    // About 9.0% open and 1.2% closed (PHYSICS.md, "Gates: tulips"):
+    // with 1000 balls, about 90 and 12 entries.
     expect(o).toMatchObject({ id: 'tulip', closedRate: null, openShare: 1, closedEntries: 0 });
     expect(c).toMatchObject({ id: 'tulip', openRate: null, openShare: 0, openEntries: 0 });
     expect(o.openRate).toBe(o.entryRate);

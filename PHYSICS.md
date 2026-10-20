@@ -135,6 +135,28 @@ Closing can't push a ball out of the way: nothing in the sim ever pushes a ball 
 
 The closed lid on the classic board is a shallow roof, 6 mm high over its 90 mm span (about 7.6°), not a flat plate: a flat lid is a ledge a ball can come to rest on for ever (the sim rests a ball exactly on a flat surface; see "Friction"), and every ball stranded there would count as stuck. On the roof, gravity along the slope is about 1.3 m/s², so a ball always rolls off. A ball dropped exactly on the apex with no sideways speed would balance there, the same knife-edge as the nail crest under the start cup (M3 tuning); the Monte Carlo found none in 410 000 balls with the lid shut (the 21-power sweep and the two 100k runs in the tuning log), and CI fails on any stuck ball.
 
+### Gates: tulips (M5)
+
+A tulip (チューリップ) is a pocket with wings. Its wings are a gate too, with two shapes: one polyline set solid while it is closed and another solid while it is open, each skipped in the other state. The game opens a closed tulip on an entry and closes an open one on the next (PLAN.md game rules), on the step the ball is taken, by `setGateOpen` as for the attacker.
+
+Switching a shape on can land on a ball, which the attacker's lid only did when closing. The same rule covers both: a ball a newly solid segment overlaps is taken by the pocket, never pushed out (nothing in the sim pushes a ball out of geometry). For a tulip that means a ball beside the hinge as the wings swing open, or between the closed wing tips as they swing shut, both a ball the moving wing would have scooped or knocked in. A taken ball is an entry like any other, so it toggles the tulip again (and could, in principle, sweep in another; each pass removes a ball, so it ends). Switching never adds energy: geometry appears or disappears, no ball moves, and a taken ball leaves (invariant tests: 30 balls round a tulip switched every 20 ms, energy never rises, no ball is ever left inside a wing, a nail, a rail or another ball, same seed same run).
+
+The launch point must be clear of every gate in both states (`parseBoard`), since opening a tulip adds geometry.
+
+There are no tulips on the classic board yet: where they go and what they pay are open questions for the maintainer (PLAN.md Status). The tests and the measurements below use a test board, `tests/fixtures/tulipBoard.ts`: the classic board with one tulip at x = 0.15 m, its mouth at y = 0.17 m (left of the field, about level with the start pocket), and the 6 nails within 30 mm of its centre line between 30 mm below and 25 mm above the mouth taken out. Its cup is the start cup's, 17 mm inside; closed, the wing tips lean in to a 12.5 mm gap (the ヘソ nails' gap) 12 mm above the hinges; open, they splay out to tips 38 mm apart, 10.5 mm up (about 45°).
+
+Measured on it with `tools/montecarlo.ts --board <the test board as .json> --balls 20000 --power 0 --seed 1`:
+
+| `--tulips`      | Tulip entries | While open | While closed | Open, share of time | Spins per ¥1000 |
+| --------------- | ------------- | ---------- | ------------ | ------------------- | --------------- |
+| `play`          | 2.07% (414)   | 7.59%      | 1.20%        | 13.6%               | 21.34 ± 0.49    |
+| `open` (held)   | 8.96% (1793)  | 8.96%      | —            | 100%                | 21.34 ± 0.49    |
+| `closed` (held) | 1.19% (238)   | —          | 1.19%        | 0%                  | 21.34 ± 0.49    |
+
+Open, the tulip takes about 7.5 times as many balls as closed. It sits below and beside the start pocket's approach, so the start pocket's entries are identical in all three runs. A sweep of powers 0 to 1 in steps of 0.1, 5000 balls each, in each mode, left no ball stuck; above power 0.1 few balls come down the left of the field, so the tulip sees little traffic there (0.0–0.4%).
+
+How the Monte Carlo measures "while open" in play: each entry is filed under the tulip's state at that moment, and each step's counted balls in play add to that state's ball-time. The rate in a state is entries per ball-step in that state, times the mean ball-steps per launched ball: the share of launched balls it would take if it stayed in that state. It is a hazard-rate estimate, and it reads low for a state whose spells are short against a flight: just after the tulip opens, many balls in play are already below it or not yet near it, so an open spell's first second or two takes few entries. Holding the tulip open or closed for a whole run (`--tulips open|closed`) measures each shape without that, and is the cleaner comparison of the shapes; the in-play figures are what a player sees.
+
 ### Energy and the resting threshold
 
 The step is semi-implicit Euler: v' = v − g·dt, then y' = y + v'·dt. In free flight this loses exactly ½g²dt² per unit mass each step, so with drag on top, energy strictly decreases (checked by test).
@@ -181,6 +203,7 @@ The ball rolls on the backboard under the normal component of gravity, g·sin 3�
 - A launched ball appears at the bottom of the lane already at launch speed. The hammer stroke isn't modelled.
 - Ball–ball contacts are frictionless, and balls have no spin (see "Ball against ball").
 - Launch speed varies by 1% from shot to shot; launch direction does not vary (see "Launch spread").
+- A tulip's wings switch shape instantly, in one step; their swing isn't modelled, so a ball can't be batted by a moving wing (see "Gates: tulips").
 
 ## Tuning log
 
