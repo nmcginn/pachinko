@@ -1,5 +1,9 @@
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { tulipBoardData } from './fixtures/tulipBoard';
 
 function run(...args: string[]) {
   return spawnSync(process.execPath, ['--import', 'tsx', 'tools/montecarlo.ts', ...args], {
@@ -27,6 +31,7 @@ describe('tools/montecarlo.ts', { timeout: 30_000 }, () => {
       '--seed',
       '--workers',
       '--open',
+      '--tulips',
     ]) {
       expect(r.stdout).toContain(flag);
     }
@@ -73,6 +78,47 @@ describe('tools/montecarlo.ts', { timeout: 30_000 }, () => {
     expect(sweep.stdout).toMatch(/power +start +out +foul +attacker/);
   });
 
+  it('runs a board from a .json path, and reports its tulips while open and while closed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'montecarlo-'));
+    const path = join(dir, 'tulip.json');
+    writeFileSync(path, JSON.stringify(tulipBoardData()));
+    const args = [
+      '--board',
+      path,
+      '--balls',
+      '300',
+      '--power',
+      '0',
+      '--seed',
+      '1',
+      '--workers',
+      '2',
+    ];
+    const play = json(...args);
+    expect(play).toMatchObject({ board: 'classic-with-tulip', tulipMode: 'play', launched: 300 });
+    const [tulip] = play.tulips;
+    expect(tulip).toMatchObject({ id: 'tulip' });
+    expect(tulip.openEntries + tulip.closedEntries).toBe(play.entries.tulip);
+    const open = json(...args, '--tulips', 'open').tulips[0];
+    const closed = json(...args, '--tulips', 'closed').tulips[0];
+    expect(open).toMatchObject({ openShare: 1, closedRate: null });
+    expect(closed).toMatchObject({ openShare: 0, openRate: null });
+    expect(open.openRate).toBeGreaterThan(closed.closedRate);
+
+    const text = run(...args);
+    expect(text.status).toBe(0);
+    expect(text.stdout).toMatch(/tulip tulip +\d+\.\d\d% +\(\d+\)/);
+    expect(text.stdout).toMatch(/while open +(\d+\.\d\d%|—) +\(\d+, open \d+\.\d\d% of the time\)/);
+    expect(text.stdout).toMatch(/while closed +\d+\.\d\d% +\(\d+\)/);
+    const held = run(...args, '--tulips', 'closed');
+    expect(held.stdout).toContain('tulips held closed');
+    expect(held.stdout).toMatch(/while open +— +\(0, open 0\.00% of the time\)/);
+    const sweep = run('--board', path, '--balls', '100', '--sweep', '0:0.1:0.1', '--workers', '1');
+    expect(sweep.stdout).toMatch(/power +start +out +foul +tulip +stuck/);
+    // A board without tulips prints no tulip lines.
+    expect(run('--balls', '50', '--workers', '1').stdout).not.toContain('tulip');
+  });
+
   it('sweeps powers into a table and marks the best', () => {
     const sweep = json('--balls', '200', '--sweep', '0:0.1:0.05', '--workers', '2');
     expect(sweep.rows.map((r: { power: number }) => r.power)).toEqual([0, 0.05, 0.1]);
@@ -105,6 +151,9 @@ describe('tools/montecarlo.ts', { timeout: 30_000 }, () => {
       ['--sweep', '0:1:0'],
       ['--board', 'no-such-board'],
       ['--board', '../package'],
+      ['--board', 'no-such-dir/board.json'],
+      ['--board', 'package.json'],
+      ['--tulips', 'ajar'],
       ['--nope'],
     ];
     for (const args of bad) {
