@@ -2,6 +2,7 @@
 // plus the M1 acceptance scene. Never weaken or delete these: if one looks
 // wrong, that is a [BLOCKED] PR, not an edit (CLAUDE.md).
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { type Material, CONTACT_SLOP_M, createCircle, createPolyline } from '../../src/sim/collide';
 import { createBoardWorld, parseBoard } from '../../src/sim/board';
@@ -23,7 +24,7 @@ import {
   stepWorld,
   totalEnergyJ,
 } from '../../src/sim/world';
-import { TULIP_MOUTH_Y_M, TULIP_X_M, tulipBoardData } from '../fixtures/tulipBoard';
+import { tulipMouth } from '../fixtures/tulips';
 import {
   GRID_DROP_Y_M,
   GRID_EXIT_Y_M,
@@ -536,11 +537,13 @@ function liveClearanceM(world: World, x: number, y: number): number {
 
 /** The tulip board's world with 30 balls in the field above and round the tulip, at random speeds up to `maxSpeedMps`. */
 function tulipScene(seed: number, maxSpeedMps: number): World {
-  const world = createBoardWorld(parseBoard(tulipBoardData()));
+  const board = parseBoard(JSON.parse(readFileSync('boards/classic.json', 'utf8')));
+  const world = createBoardWorld(board);
+  const mouth = tulipMouth(board, TULIP);
   const rng = createRng(seed);
   while (world.balls.length < 30) {
-    const x = TULIP_X_M + rng.range(-0.035, 0.035);
-    const y = TULIP_MOUTH_Y_M + rng.range(0.005, 0.15);
+    const x = mouth.xM + rng.range(-0.035, 0.035);
+    const y = mouth.yM + rng.range(0.005, 0.15);
     const angle = rng.range(0, 2 * Math.PI);
     const speed = rng.range(0, maxSpeedMps);
     if (liveClearanceM(world, x, y) < 0 || overlapsBall(world, x, y)) continue;
@@ -548,6 +551,11 @@ function tulipScene(seed: number, maxSpeedMps: number): World {
   }
   return world;
 }
+
+/** The tulip the scenes switch: the classic board's left one. */
+const TULIP = 'tulip-left';
+const toggle = (world: World) =>
+  setGateOpen(world, TULIP, !world.gates.find((g) => g.id === TULIP)?.open);
 
 /** Toggle the tulip every 20 ms, far more often than play does, so wings switch round balls in flight. */
 const TOGGLE_STEPS = steps(0.02);
@@ -563,7 +571,7 @@ describe(
         let previous = totalEnergyJ(world);
         for (let i = 0; i < steps(2); i++) {
           if (i % TOGGLE_STEPS === 0) {
-            setGateOpen(world, 'tulip', !world.gates.find((g) => g.id === 'tulip')?.open);
+            toggle(world);
             const now = totalEnergyJ(world);
             if (!(now <= previous))
               throw new Error(`a switch raised energy by ${now - previous} J`);
@@ -585,11 +593,7 @@ describe(
         const world = tulipScene(seed, MAX_LAUNCH_SPEED_MPS);
         for (let i = 0; i < steps(1); i++) {
           if (i % TOGGLE_STEPS === 0) {
-            swept += setGateOpen(
-              world,
-              'tulip',
-              !world.gates.find((g) => g.id === 'tulip')?.open,
-            ).length;
+            swept += toggle(world).length;
             for (const ball of world.balls) {
               expect(liveClearanceM(world, ball.x, ball.y)).toBeGreaterThanOrEqual(-CONTACT_SLOP_M);
             }
@@ -611,8 +615,7 @@ describe(
         const out: number[] = [];
         for (let i = 0; i < steps(1); i++) {
           if (i % TOGGLE_STEPS === 0) {
-            for (const c of setGateOpen(world, 'tulip', !world.gates[world.gates.length - 1]?.open))
-              out.push(-c.ball.id);
+            for (const c of toggle(world)) out.push(-c.ball.id);
           }
           stepWorld(world);
           out.push(...snapshotBalls(world));

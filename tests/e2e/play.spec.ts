@@ -8,6 +8,7 @@ const counts = (page: Page) =>
   page.locator('#balls').evaluate((el: HTMLElement) => ({
     balls: Number(el.dataset['balls']),
     starts: Number(el.dataset['starts']),
+    tulips: Number(el.dataset['tulips']),
     launched: Number(el.dataset['launched']),
   }));
 const inPlay = async (page: Page) =>
@@ -27,11 +28,11 @@ test('M2 acceptance: holding fire for 3 s makes the ball counter drop', async ({
   await page.keyboard.up('Space');
   // 100 a minute is one every 0.6 s, first one at once: 5 or 6 in 3 s of
   // sim time. A stalled frame drops time, so allow fewer, never more.
-  const { balls: left, launched, starts } = await counts(page);
+  const { balls: left, launched, starts, tulips } = await counts(page);
   expect(launched).toBeGreaterThanOrEqual(3);
   expect(launched).toBeLessThanOrEqual(6);
-  // One ball per shot, and 3 back for any that already reached the start pocket.
-  expect(left).toBe(250 - launched + 3 * starts);
+  // One ball per shot, and 3 back for any that already reached the start pocket or a tulip.
+  expect(left).toBe(250 - launched + 3 * starts + 3 * tulips);
   expect(left).toBeLessThan(250);
   await expect(page.locator('#balls')).toHaveText(`Balls ${left}`);
 });
@@ -43,10 +44,12 @@ test('releasing fire stops launching, and launched balls drain out of play', asy
   const before = await counts(page);
   // Every ball leaves through a pocket within a few seconds and is removed.
   await expect.poll(() => inPlay(page), { timeout: 15_000 }).toBe(0);
-  // Nothing more was launched; only start-pocket payouts (3 each) came back.
+  // Nothing more was launched; only start-pocket and tulip payouts (3 each) came back.
   const after = await counts(page);
   expect(after.launched).toBe(before.launched);
-  expect(after.balls).toBe(before.balls + 3 * (after.starts - before.starts));
+  expect(after.balls).toBe(
+    before.balls + 3 * (after.starts - before.starts) + 3 * (after.tulips - before.tulips),
+  );
 });
 
 test('arrow keys adjust the handle power', async ({ page }) => {
@@ -97,18 +100,22 @@ test('letting go of the dial does not cancel a held space bar', async ({ page })
 });
 
 test('M3: a start-pocket entry pays 3 balls into the tray', async ({ page }) => {
-  // Seed 8 at power 0: the first shot enters the start pocket, 1.25 s after
-  // it is fired. Shots follow at fixed sim-step intervals and each one's
-  // speed comes from the seed, so frame timing can't change which one, even
-  // with balls colliding (M5).
-  await page.goto('/?seed=8');
-  // Well past the bottom of the range, so power clamps to exactly 0.
+  // Seed 54 at power 0.2, the classic board's best: the first shot enters
+  // the start pocket, 0.96 s after it is fired, and nothing else enters a
+  // paying pocket for 10 s. Shots follow at fixed sim-step intervals and each
+  // one's speed comes from the seed, so frame timing can't change which one,
+  // even with balls colliding (M5). If physics changes move it, search for a
+  // new seed with a headless table rather than loosen this.
+  await page.goto('/?seed=54');
+  // Down past the bottom of the range, then up 10 steps: exactly 0.2.
   for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowDown');
-  await expect.poll(() => power(page)).toBe(0);
+  for (let i = 0; i < 10; i++) await page.keyboard.press('ArrowUp');
+  await expect.poll(() => power(page)).toBe(0.2);
   await page.keyboard.down('Space');
   await expect.poll(async () => (await counts(page)).starts, { timeout: 10_000 }).toBe(1);
   await page.keyboard.up('Space');
-  const { balls: left, launched, starts } = await counts(page);
-  expect(launched).toBeGreaterThanOrEqual(3);
+  const { balls: left, launched, starts, tulips } = await counts(page);
+  expect(launched).toBeGreaterThanOrEqual(2);
+  expect(tulips).toBe(0);
   expect(left).toBe(250 - launched + 3 * starts);
 });

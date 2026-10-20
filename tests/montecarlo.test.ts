@@ -1,9 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { tulipBoardData } from './fixtures/tulipBoard';
 
 function run(...args: string[]) {
   return spawnSync(process.execPath, ['--import', 'tsx', 'tools/montecarlo.ts', ...args], {
@@ -47,21 +46,21 @@ describe('tools/montecarlo.ts', { timeout: 30_000 }, () => {
   });
 
   it('gives identical results across runs and worker counts', () => {
-    const args = ['--balls', '800', '--power', '0', '--seed', '5'];
+    const args = ['--balls', '800', '--power', '0.2', '--seed', '5'];
     const one = json(...args, '--workers', '1');
     const three = json(...args, '--workers', '3');
     const again = json(...args, '--workers', '3');
     expect(three).toEqual(one);
     expect(again).toEqual(one);
-    expect(one).toMatchObject({ board: 'classic', seed: 5, power: 0, launched: 800 });
-    const { start, out, foul, attacker } = one.entries;
+    expect(one).toMatchObject({ board: 'classic', seed: 5, power: 0.2, launched: 800 });
+    const { start, out, foul, attacker, tulip } = one.entries;
     expect(attacker).toBe(0);
     expect(one.gatesOpen).toBe(false);
-    expect(start + out + foul + one.lost + one.stuck).toBe(800);
+    expect(start + out + foul + tulip + one.lost + one.stuck).toBe(800);
   });
 
   it('holds the attacker open with --open, and reports what it catches', () => {
-    const args = ['--balls', '400', '--power', '0', '--seed', '5', '--workers', '2'];
+    const args = ['--balls', '400', '--power', '0.2', '--seed', '5', '--workers', '2'];
     const shut = json(...args);
     const open = json(...args, '--open');
     expect(open.gatesOpen).toBe(true);
@@ -78,45 +77,53 @@ describe('tools/montecarlo.ts', { timeout: 30_000 }, () => {
     expect(sweep.stdout).toMatch(/power +start +out +foul +attacker/);
   });
 
-  it('runs a board from a .json path, and reports its tulips while open and while closed', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'montecarlo-'));
-    const path = join(dir, 'tulip.json');
-    writeFileSync(path, JSON.stringify(tulipBoardData()));
-    const args = [
-      '--board',
-      path,
-      '--balls',
-      '300',
-      '--power',
-      '0',
-      '--seed',
-      '1',
-      '--workers',
-      '2',
-    ];
+  it('reports each tulip while open and while closed, and holds them with --tulips', () => {
+    const args = ['--balls', '300', '--power', '0.2', '--seed', '1', '--workers', '2'];
     const play = json(...args);
-    expect(play).toMatchObject({ board: 'classic-with-tulip', tulipMode: 'play', launched: 300 });
-    const [tulip] = play.tulips;
-    expect(tulip).toMatchObject({ id: 'tulip' });
-    expect(tulip.openEntries + tulip.closedEntries).toBe(play.entries.tulip);
-    const open = json(...args, '--tulips', 'open').tulips[0];
-    const closed = json(...args, '--tulips', 'closed').tulips[0];
-    expect(open).toMatchObject({ openShare: 1, closedRate: null });
-    expect(closed).toMatchObject({ openShare: 0, openRate: null });
-    expect(open.openRate).toBeGreaterThan(closed.closedRate);
+    expect(play).toMatchObject({ board: 'classic', tulipMode: 'play', launched: 300 });
+    expect(play.tulips.map((t: { id: string }) => t.id)).toEqual(['tulip-left', 'tulip-right']);
+    const sum = play.tulips.reduce(
+      (n: number, t: { openEntries: number; closedEntries: number }) =>
+        n + t.openEntries + t.closedEntries,
+      0,
+    );
+    expect(sum).toBe(play.entries.tulip);
+    const open = json(...args, '--tulips', 'open').tulips;
+    const closed = json(...args, '--tulips', 'closed').tulips;
+    for (let k = 0; k < 2; k++) {
+      expect(open[k]).toMatchObject({ openShare: 1, closedRate: null });
+      expect(closed[k]).toMatchObject({ openShare: 0, openRate: null });
+      expect(open[k].openRate).toBeGreaterThan(closed[k].closedRate);
+    }
 
     const text = run(...args);
     expect(text.status).toBe(0);
-    expect(text.stdout).toMatch(/tulip tulip +\d+\.\d\d% +\(\d+\)/);
+    for (const id of ['tulip-left', 'tulip-right']) {
+      expect(text.stdout).toMatch(new RegExp(`^  ${id} +\\d+\\.\\d\\d% +\\(\\d+\\)`, 'm'));
+    }
     expect(text.stdout).toMatch(/while open +(\d+\.\d\d%|—) +\(\d+, open \d+\.\d\d% of the time\)/);
     expect(text.stdout).toMatch(/while closed +\d+\.\d\d% +\(\d+\)/);
     const held = run(...args, '--tulips', 'closed');
     expect(held.stdout).toContain('tulips held closed');
     expect(held.stdout).toMatch(/while open +— +\(0, open 0\.00% of the time\)/);
-    const sweep = run('--board', path, '--balls', '100', '--sweep', '0:0.1:0.1', '--workers', '1');
+    const sweep = run('--balls', '100', '--sweep', '0.2:0.3:0.1', '--workers', '1');
     expect(sweep.stdout).toMatch(/power +start +out +foul +tulip +stuck/);
-    // A board without tulips prints no tulip lines.
-    expect(run('--balls', '50', '--workers', '1').stdout).not.toContain('tulip');
+  });
+
+  it('runs a board from a .json path; one without tulips prints no tulip lines', () => {
+    const data = JSON.parse(readFileSync('boards/classic.json', 'utf8'));
+    data.name = 'bare';
+    data.pockets = data.pockets.filter((p: { kind: string }) => p.kind !== 'tulip');
+    // And their cups, or balls would come to rest in them.
+    data.rails = data.rails.filter((r: { id: string }) => !r.id.startsWith('tulip-'));
+    const dir = mkdtempSync(join(tmpdir(), 'montecarlo-'));
+    const path = join(dir, 'bare.json');
+    writeFileSync(path, JSON.stringify(data));
+    const args = ['--board', path, '--balls', '50', '--power', '0.2', '--workers', '1'];
+    expect(json(...args)).toMatchObject({ board: 'bare', tulips: [], launched: 50, stuck: 0 });
+    const text = run(...args);
+    expect(text.stdout).toContain('board bare, power 0.2, 50 balls');
+    expect(text.stdout).not.toContain('tulip');
   });
 
   it('sweeps powers into a table and marks the best', () => {

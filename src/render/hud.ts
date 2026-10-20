@@ -29,6 +29,7 @@ export function createHud(els: HudElements): Hud {
   let shownLaunched = NaN;
   let shownAttacker = NaN;
   let shownFoul = NaN;
+  let shownTulips = NaN;
 
   return {
     update(economy, fire, inPlay) {
@@ -44,6 +45,10 @@ export function createHud(els: HudElements): Hud {
       if (economy.entries.attacker !== shownAttacker) {
         shownAttacker = economy.entries.attacker;
         els.balls.dataset['attacker'] = String(economy.entries.attacker);
+      }
+      if (economy.entries.tulip !== shownTulips) {
+        shownTulips = economy.entries.tulip;
+        els.balls.dataset['tulips'] = String(economy.entries.tulip);
       }
       if (economy.entries.foul !== shownFoul) {
         shownFoul = economy.entries.foul;

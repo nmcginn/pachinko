@@ -1,6 +1,7 @@
 // M2 acceptance on boards/classic.json: a mid-power shot clears the top rail
 // and lands in the field, and balls leave through the out-hole and are
-// removed. Also the PLAN.md invariants, checked on the real board.
+// removed. Also the PLAN.md invariants, checked on the real board, and the
+// handle's range since the remap (M5): the bottom fouls, as on real machines.
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -9,6 +10,7 @@ import {
   type PocketKind,
   createBoardWorld,
   launchBall,
+  launchSpeedMps,
   parseBoard,
   pocketKind,
 } from '../../src/sim/board';
@@ -26,6 +28,16 @@ import {
 
 const classic: Board = parseBoard(JSON.parse(readFileSync('boards/classic.json', 'utf8')));
 const steps = (simS: number) => Math.round(simS / SIM_STEP_S);
+/** The best handle power (PHYSICS.md tuning log, the handle remap). */
+const BEST_POWER = 0.2;
+/**
+ * Shots at nominal speed (no launch spread) below this power foul: power
+ * 0.05 is 2.82 m/s, power 0.1 2.93 m/s, just enough to clear the lane.
+ * With the spread, about 4 shots in 10 still foul at 0.1 (PHYSICS.md).
+ */
+const FOUL_BELOW_POWER = 0.1;
+/** Where a ball can end up once it has reached the field. */
+const FIELD_ENDS = ['out', 'start', 'tulip'];
 
 /** The outer guide rail's highest point: the top of the playfield. */
 const railTopY = Math.max(
@@ -45,7 +57,9 @@ function clearanceM(world: World, x: number, y: number): number {
   for (const c of world.circles) {
     min = Math.min(min, Math.hypot(x - c.x, y - c.y) - c.radiusM - BALL_RADIUS_M);
   }
-  for (const s of world.segments) {
+  for (const [i, s] of world.segments.entries()) {
+    // A gate's segments of the other state (a closed tulip's open wings) aren't there.
+    if (world.segmentOff[i]) continue;
     const along = Math.min(s.lengthM, Math.max(0, (x - s.ax) * s.ux + (y - s.ay) * s.uy));
     min = Math.min(
       min,
@@ -115,10 +129,26 @@ describe('boards/classic.json', () => {
     expect(classic.name).toBe('classic');
     expect(classic.nails.length).toBeGreaterThan(100);
     const ids = classic.rails.map((r) => r.id);
-    for (const id of ['outer', 'inner', 'floor-left', 'floor-right', 'start-cup', 'attacker-box']) {
+    for (const id of [
+      'outer',
+      'inner',
+      'floor-left',
+      'floor-right',
+      'start-cup',
+      'attacker-box',
+      'tulip-left-cup',
+      'tulip-right-cup',
+    ]) {
       expect(ids).toContain(id);
     }
-    expect(classic.pockets.map((p) => p.kind).sort()).toEqual(['attacker', 'foul', 'out', 'start']);
+    expect(classic.pockets.map((p) => p.kind).sort()).toEqual([
+      'attacker',
+      'foul',
+      'out',
+      'start',
+      'tulip',
+      'tulip',
+    ]);
   });
 
   it("puts the attacker below the start cup, a ball's width clear of every nail, lid shut", () => {
@@ -146,7 +176,34 @@ describe('boards/classic.json', () => {
       }
     }
     const world = createBoardWorld(classic);
-    expect(world.gates).toEqual([expect.objectContaining({ id: attacker.id, open: false })]);
+    expect(world.gates.find((g) => g.id === attacker.id)).toMatchObject({ open: false });
+  });
+
+  it('puts two tulips either side of the start pocket, level with it, mirror images', () => {
+    const [left, right] = classic.pockets.filter((p) => p.kind === 'tulip');
+    const start = classic.pockets.find((p) => p.kind === 'start');
+    if (!left?.wings || !right?.wings || !start) throw new Error('classic board has no tulips');
+    const mirror = (pts: readonly { x: number; y: number }[]) =>
+      pts.map((p) => ({ x: Math.round((0.5 - p.x) * 1e6) / 1e6, y: p.y }));
+    const round = (pts: readonly { x: number; y: number }[]) =>
+      pts.map((p) => ({ x: Math.round(p.x * 1e6) / 1e6, y: p.y }));
+    // The right tulip is the left one reflected in the board's centre line, x = 0.25 m.
+    const sortX = (pts: { x: number; y: number }[]) =>
+      [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+    expect(sortX(round(right.polygon))).toEqual(sortX(mirror(left.polygon)));
+    for (const state of ['closed', 'open'] as const) {
+      // Reflected, the left wing becomes the right one: same wings, other order.
+      expect(right.wings[state].map((w) => round(w))).toEqual(
+        left.wings[state].map((w) => mirror(w)).reverse(),
+      );
+    }
+    // Level with the start pocket: their sensors' tops within 5 mm of its top.
+    const ys = (p: typeof start) => p.polygon.map((q) => q.y);
+    expect(Math.abs(Math.max(...ys(left)) - Math.max(...ys(start)))).toBeLessThan(0.005);
+    const world = createBoardWorld(classic);
+    for (const id of [left.id, right.id]) {
+      expect(world.gates.find((g) => g.id === id)).toMatchObject({ open: false });
+    }
   });
 });
 
@@ -163,18 +220,25 @@ describe('M2 acceptance: a ball launched at mid power clears the top rail and la
   });
 
   it('and leaves through a pocket in the field, not the foul pocket', () => {
-    expect(['out', 'start']).toContain(shot.end);
+    expect(FIELD_ENDS).toContain(shot.end);
   });
 });
 
-describe('every power from 0 to 1 reaches the field and leaves through the out-hole or start pocket', () => {
+describe('every power from 0 to 1: the bottom of the handle fouls, the rest reach the field', () => {
   const shots = Array.from({ length: 21 }, (_, k) => [k / 20, shoot(k / 20)] as const);
 
   for (const [power, shot] of shots) {
     it(`power ${power.toFixed(2)}`, () => {
-      expect(shot.maxY).toBeGreaterThan(laneEndY + 0.01);
-      expect(shot.firstNailS).not.toBeNull();
-      expect(['out', 'start']).toContain(shot.end);
+      if (power < FOUL_BELOW_POWER) {
+        // Too weak to leave the lane: rolls back into the foul pocket.
+        expect(shot.end).toBe('foul');
+        expect(shot.firstNailS).toBeNull();
+      } else {
+        // Out of the lane (power 0.1 only just), onto a nail, into a field pocket.
+        expect(shot.maxY).toBeGreaterThan(laneEndY);
+        expect(shot.firstNailS).not.toBeNull();
+        expect(FIELD_ENDS).toContain(shot.end);
+      }
       // Invariants on the real board: no tunnelling, no energy gain.
       expect(shot.minClearanceM).toBeGreaterThanOrEqual(-CONTACT_SLOP_M);
       expect(shot.energyRises).toBe(0);
@@ -203,10 +267,15 @@ describe('foul: a shot too weak to reach the field', () => {
     expect(shot.firstNailS).toBeNull();
   });
 
-  it('never happens at the weakest handle setting, with margin', () => {
-    // 5% below the power-0 speed still clears the lane.
+  it('happens at the bottom of the handle, as on real machines', () => {
+    expect(shoot(0).end).toBe('foul');
+    expect(launchSpeedMps(classic.launcher, 0)).toBeLessThan(2.9);
+  });
+
+  it('never happens at the best power, with margin', () => {
+    // 3% (three launch-spread standard deviations) below the best power's speed still clears the lane.
     const { launcher } = classic;
-    const speed = launcher.minSpeedMps * 0.95;
+    const speed = launchSpeedMps(launcher, BEST_POWER) * 0.97;
     const shot = shoot(0, 20, (world) =>
       addBall(world, {
         x: launcher.x,
@@ -215,7 +284,7 @@ describe('foul: a shot too weak to reach the field', () => {
         vy: speed * launcher.dirY,
       }),
     );
-    expect(['out', 'start']).toContain(shot.end);
+    expect(FIELD_ENDS).toContain(shot.end);
   });
 });
 
@@ -238,7 +307,7 @@ describe('M2 acceptance: balls exit through the out-hole and are removed', () =>
     }
     expect(launched).toBe(40);
     expect(world.balls).toEqual([]);
-    expect((ends.get('out') ?? 0) + (ends.get('start') ?? 0)).toBe(40);
+    expect((ends.get('out') ?? 0) + (ends.get('start') ?? 0) + (ends.get('tulip') ?? 0)).toBe(40);
     expect(ends.get('out')).toBeGreaterThan(20);
   });
 });

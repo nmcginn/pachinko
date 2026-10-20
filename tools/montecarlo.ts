@@ -249,7 +249,7 @@ function printRun(name: string, run: RunOptions, r: Row): void {
   }
   for (const t of r.tulips) {
     const entries = t.openEntries + t.closedEntries;
-    console.log(`  tulip ${t.id.padEnd(10)} ${pct(t.entryRate).padStart(7)}  (${entries})`);
+    console.log(`  ${t.id.padEnd(16)} ${pct(t.entryRate).padStart(7)}  (${entries})`);
     console.log(
       `    while open     ${pctOrDash(t.openRate).padStart(7)}  (${t.openEntries}, open ${pct(t.openShare)} of the time)`,
     );

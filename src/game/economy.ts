@@ -10,11 +10,7 @@ export const STARTING_BALLS = 250;
 export const START_POCKET_PAYOUT = 3;
 /** Balls paid into the tray for each attacker entry, during a jackpot round or swept in as it closes. */
 export const ATTACKER_PAYOUT = 15;
-/**
- * Balls paid into the tray for each tulip entry, open or closed.
- * Provisional: what a tulip pays is an open question for the maintainer
- * (PLAN.md Status). 3 is the recommendation there; no board has a tulip yet.
- */
+/** Balls paid into the tray for each tulip entry, open or closed: the start pocket's 3 (the maintainer's choice, M5). */
 export const TULIP_PAYOUT = 3;
 
 /** What a pocket pays into the tray. A foul's returned ball is not a payout. */

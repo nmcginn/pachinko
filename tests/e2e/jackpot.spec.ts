@@ -38,12 +38,20 @@ const counts = (page: Page) =>
     starts: Number(el.dataset['starts']),
     attacker: Number(el.dataset['attacker']),
     fouls: Number(el.dataset['fouls']),
+    tulips: Number(el.dataset['tulips']),
     launched: Number(el.dataset['launched']),
   }));
 
+/** Set the handle to 0.2, the classic board's best power: to the bottom, then 10 key steps up. */
+async function bestPower(page: Page): Promise<void> {
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowDown');
+  for (let i = 0; i < 10; i++) await page.keyboard.press('ArrowUp');
+  await expect(page.locator('#handle')).toHaveAttribute('data-power', '0.200');
+}
+
 test.beforeEach(async ({ page }) => {
   await page.clock.install();
-  await page.goto('/?seed=58');
+  await page.goto('/?seed=187');
   await page.clock.runFor(200);
   await expect(page.locator('#balls')).toHaveAttribute('data-balls', '250');
 });
@@ -57,9 +65,9 @@ test('the reel panel starts idle, showing 000 and no holds', async ({ page }) =>
 
 test('M4 acceptance: the forced-jackpot key plays a full 10-round sequence', async ({ page }) => {
   test.setTimeout(240_000);
-  // Fire at power 0, the classic board's best for the middle of the field,
+  // Fire at power 0.2, the classic board's best for the middle of the field,
   // so the attacker takes balls and some rounds can fill by count.
-  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowDown');
+  await bestPower(page);
   await page.keyboard.down('Space');
   await page.keyboard.press('KeyJ');
 
@@ -89,20 +97,22 @@ test('M4 acceptance: the forced-jackpot key plays a full 10-round sequence', asy
   // The reel stopped on three of a kind. (Spins held during the rounds may be spinning now.)
   expect(jackpotDigits).toMatch(/^(\d)\1\1$/);
 
-  // Every ball is accounted for: each attacker entry paid 15, each start 3, fouls came back.
+  // Every ball is accounted for: each attacker entry paid 15, each start and
+  // tulip entry 3, fouls came back.
   const c = await counts(page);
   expect(c.attacker).toBeGreaterThan(10);
-  expect(c.balls).toBe(250 - c.launched + 3 * c.starts + 15 * c.attacker + c.fouls);
+  expect(c.balls).toBe(250 - c.launched + 3 * c.starts + 3 * c.tulips + 15 * c.attacker + c.fouls);
 });
 
 test('start-pocket entries spin the reel, and held spins light the hold lamps', async ({
   page,
 }) => {
-  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowDown');
+  await bestPower(page);
   await page.keyboard.down('Space');
-  // Seed 58 at power 0: start-pocket entries at 1.6 s and 3.7 s of sim time,
-  // the second while the first still spins. (Seed 8 did this until balls
-  // collided, M5: a collision now sends its second entry down the out-hole.)
+  // Seed 187 at power 0.2: start-pocket entries at 1.15 s and 2.94 s of sim
+  // time, the second while the first still spins. (Seeds 8 and then 58 did
+  // this until physics changes, M5's ball collisions and then the handle
+  // remap, moved their entries; search with a headless table for a new one.)
   await expect
     .poll(async () => {
       await page.clock.runFor(250);

@@ -7,9 +7,11 @@ import { type Table, createTable, stepTable } from '../../src/game/table';
 import { tulipOpen } from '../../src/game/tulip';
 import { parseBoard } from '../../src/sim/board';
 import { SIM_STEP_S, addBall } from '../../src/sim/world';
-import { TULIP_MOUTH_Y_M, TULIP_X_M, tulipBoardData } from '../fixtures/tulipBoard';
+import { tulipMouth, underLeftOpenWing } from '../fixtures/tulips';
 
 const classic = parseBoard(JSON.parse(readFileSync('boards/classic.json', 'utf8')));
+/** The classic board's best handle power (PHYSICS.md tuning log, the handle remap). */
+const BEST_POWER = 0.2;
 const steps = (simS: number) => Math.round(simS / SIM_STEP_S);
 
 describe('table', () => {
@@ -44,10 +46,10 @@ describe('table', () => {
     table.fire.held = true;
     for (let i = 0; i < steps(30); i++) stepTable(table);
     expect(table.world.balls).toEqual([]);
-    const { start, out, foul } = table.economy.entries;
-    // Each start-pocket entry paid 3 more, which were launched in turn.
-    expect(table.economy).toMatchObject({ balls: 0, launched: 3 + 3 * start });
-    expect(start + out).toBe(table.economy.launched);
+    const { start, out, foul, tulip } = table.economy.entries;
+    // Each start-pocket or tulip entry paid 3 more, which were launched in turn.
+    expect(table.economy).toMatchObject({ balls: 0, launched: 3 + 3 * (start + tulip) });
+    expect(start + out + tulip).toBe(table.economy.launched);
     expect(foul).toBe(0);
   });
 
@@ -94,17 +96,19 @@ describe('table', () => {
   });
 
   it('pays 3 balls into the tray for each start-pocket entry', () => {
-    // Power 0 is the classic board's best: about one shot in twelve enters.
+    // At the best power about one shot in twelve enters.
     const table = createTable(classic, { seed: 1 });
-    table.fire.power = 0;
+    table.fire.power = BEST_POWER;
     table.fire.held = true;
     for (let i = 0; i < steps(60); i++) stepTable(table);
     const { economy } = table;
-    expect(economy.entries.start).toBeGreaterThan(0);
-    expect(economy.paidOut).toBe(3 * economy.entries.start);
+    const { start, out, tulip } = economy.entries;
+    expect(start).toBeGreaterThan(0);
+    expect(economy.paidOut).toBe(3 * start + TULIP_PAYOUT * tulip);
     // Every ball is in the tray, in play, or gone down a pocket; payouts add to the tray.
-    const { start, out } = economy.entries;
-    expect(economy.balls + table.world.balls.length).toBe(250 - start - out + economy.paidOut);
+    expect(economy.balls + table.world.balls.length).toBe(
+      250 - start - out - tulip + economy.paidOut,
+    );
   });
 
   it('varies launch speed shot to shot, from its seed', () => {
@@ -148,7 +152,7 @@ describe('table', () => {
   it('plays a forced jackpot through 10 rounds, the attacker opening only for each round', () => {
     const table = createTable(classic, { seed: 5, jackpotProbability: 0 });
     const { machine, world, economy } = table;
-    table.fire.power = 0;
+    table.fire.power = BEST_POWER;
     table.fire.held = true;
     const gate = world.gates[0];
     expect(gate?.id).toBe('attacker');
@@ -171,15 +175,19 @@ describe('table', () => {
     expect(machine.phase.kind).not.toBe('jackpot');
     expect(machine.jackpots).toBe(1);
     // Firing at the auto-fire rate, the attacker took balls, and each paid 15.
-    const { start, out, attacker } = economy.entries;
+    const { start, out, attacker, tulip } = economy.entries;
     expect(attacker).toBeGreaterThan(ROUNDS * 5);
-    expect(economy.paidOut).toBe(START_POCKET_PAYOUT * start + ATTACKER_PAYOUT * attacker);
-    expect(economy.balls + world.balls.length).toBe(250 - start - out - attacker + economy.paidOut);
+    expect(economy.paidOut).toBe(
+      START_POCKET_PAYOUT * start + ATTACKER_PAYOUT * attacker + TULIP_PAYOUT * tulip,
+    );
+    expect(economy.balls + world.balls.length).toBe(
+      250 - start - out - attacker - tulip + economy.paidOut,
+    );
   });
 
   it('keeps the attacker shut outside a jackpot', () => {
     const table = createTable(classic, { seed: 1, jackpotProbability: 0 });
-    table.fire.power = 0;
+    table.fire.power = BEST_POWER;
     table.fire.held = true;
     for (let i = 0; i < steps(60); i++) stepTable(table);
     expect(table.economy.entries.start).toBeGreaterThan(0);
@@ -191,7 +199,7 @@ describe('table', () => {
   it('draws the lottery from its own stream: jackpot odds never shift launch speeds', () => {
     const run = (jackpotProbability: number) => {
       const table = createTable(classic, { seed: 1, jackpotProbability });
-      table.fire.power = 0;
+      table.fire.power = BEST_POWER;
       table.fire.held = true;
       const speeds: number[] = [];
       for (let i = 0; i < steps(60); i++) {
@@ -210,91 +218,96 @@ describe('table', () => {
     expect(always.machine.jackpots).toBeGreaterThan(0);
   });
 
-  describe('with a tulip', () => {
-    const tulipBoard = parseBoard(tulipBoardData());
+  describe('tulips', () => {
+    const TULIPS = ['tulip-left', 'tulip-right'];
+    const openCount = (table: Table) => TULIPS.filter((id) => tulipOpen(table.world, id)).length;
 
-    /** Drop a ball straight into the tulip's mouth and step until the tulip takes it. Returns the steps taken. */
-    function dropIntoTulip(table: Table): number {
+    /** Drop a ball straight into a tulip's mouth and step until a tulip takes it. Returns the steps taken. */
+    function dropIntoTulip(table: Table, id: string): number {
       const before = table.economy.entries.tulip;
-      addBall(table.world, { x: TULIP_X_M, y: TULIP_MOUTH_Y_M + 0.02 });
+      const mouth = tulipMouth(classic, id);
+      addBall(table.world, { x: mouth.xM, y: mouth.yM + 0.02 });
       for (let i = 1; i <= steps(1); i++) {
         stepTable(table);
         if (table.economy.entries.tulip > before) return i;
       }
-      throw new Error('the tulip never took the ball');
+      throw new Error(`${id} never took the ball`);
     }
 
-    it('opens on an entry, closes on the next, and pays each', () => {
-      const table = createTable(tulipBoard, { startingBalls: 0 });
-      expect(tulipOpen(table.world, 'tulip')).toBe(false);
-      dropIntoTulip(table);
-      expect(tulipOpen(table.world, 'tulip')).toBe(true);
-      expect(table.economy).toMatchObject({ balls: TULIP_PAYOUT, paidOut: TULIP_PAYOUT });
-      dropIntoTulip(table);
-      expect(tulipOpen(table.world, 'tulip')).toBe(false);
-      dropIntoTulip(table);
-      expect(tulipOpen(table.world, 'tulip')).toBe(true);
-      expect(table.economy.entries.tulip).toBe(3);
-      expect(table.economy.paidOut).toBe(3 * TULIP_PAYOUT);
-      // Stays open with nothing entering: no timer.
-      for (let i = 0; i < steps(5); i++) stepTable(table);
-      expect(tulipOpen(table.world, 'tulip')).toBe(true);
+    it('each opens on an entry, closes on the next, and pays each', () => {
+      for (const id of TULIPS) {
+        const table = createTable(classic, { startingBalls: 0 });
+        expect(tulipOpen(table.world, id)).toBe(false);
+        dropIntoTulip(table, id);
+        expect(tulipOpen(table.world, id)).toBe(true);
+        expect(openCount(table)).toBe(1);
+        expect(table.economy).toMatchObject({ balls: TULIP_PAYOUT, paidOut: TULIP_PAYOUT });
+        dropIntoTulip(table, id);
+        expect(tulipOpen(table.world, id)).toBe(false);
+        dropIntoTulip(table, id);
+        expect(tulipOpen(table.world, id)).toBe(true);
+        expect(table.economy.entries.tulip).toBe(3);
+        expect(table.economy.paidOut).toBe(3 * TULIP_PAYOUT);
+        // Stays open with nothing entering: no timer.
+        for (let i = 0; i < steps(5); i++) stepTable(table);
+        expect(tulipOpen(table.world, id)).toBe(true);
+      }
     });
 
     it('records a ball the opening wings sweep in as an entry, which closes it again', () => {
+      const id = 'tulip-left';
+      const mouth = tulipMouth(classic, id);
       // How many steps the drop takes, from a dry run: the same every time.
-      const dropSteps = dropIntoTulip(createTable(tulipBoard, { startingBalls: 0 }));
-      const table = createTable(tulipBoard, { startingBalls: 0 });
-      addBall(table.world, { x: TULIP_X_M, y: TULIP_MOUTH_Y_M + 0.02 });
+      const dropSteps = dropIntoTulip(createTable(classic, { startingBalls: 0 }), id);
+      const table = createTable(classic, { startingBalls: 0 });
+      addBall(table.world, { x: mouth.xM, y: mouth.yM + 0.02 });
       for (let i = 1; i < dropSteps; i++) stepTable(table);
       expect(table.economy.entries.tulip).toBe(0);
       // A ball where the left open wing is about to appear (clear of the closed one).
-      addBall(table.world, { x: TULIP_X_M - 0.0159, y: TULIP_MOUTH_Y_M + 0.0031 });
+      addBall(table.world, underLeftOpenWing(mouth));
       stepTable(table);
       expect(table.economy.entries.tulip).toBe(2);
       expect(table.economy.paidOut).toBe(2 * TULIP_PAYOUT);
-      expect(tulipOpen(table.world, 'tulip')).toBe(false);
+      expect(tulipOpen(table.world, id)).toBe(false);
       expect(table.world.balls).toEqual([]);
     });
 
-    it('takes tulip entries in normal play, and every ball is accounted for', () => {
-      // A closed tulip takes about one ball in 70, so a seed can see none in
-      // 120 s; seed 3 sees four (at 30, 33, 86 and 105 s). If physics changes
-      // move them, pick another seed with entries rather than weaken this.
-      const table = createTable(tulipBoard, { seed: 3, jackpotProbability: 0 });
-      table.fire.power = 0;
+    it('take entries in normal play at the best power, and every ball is accounted for', () => {
+      const table = createTable(classic, { seed: 3, jackpotProbability: 0 });
+      table.fire.power = BEST_POWER;
       table.fire.held = true;
       let toggles = 0;
-      let wasOpen = false;
+      let wasOpen = TULIPS.map(() => false);
       for (let i = 0; i < steps(120); i++) {
         stepTable(table);
-        const open = tulipOpen(table.world, 'tulip');
-        if (open !== wasOpen) toggles += 1;
+        const open = TULIPS.map((id) => tulipOpen(table.world, id));
+        toggles += open.filter((o, k) => o !== wasOpen[k]).length;
         wasOpen = open;
       }
       const { economy } = table;
-      const { start, out, tulip } = economy.entries;
+      const { start, out, foul, tulip } = economy.entries;
       expect(tulip).toBeGreaterThan(0);
-      // Every entry toggles the tulip; two in one step would show as none.
+      // Every entry toggles one tulip; two into one tulip in one step would show as none.
       expect(toggles).toBeLessThanOrEqual(tulip);
       expect(toggles % 2).toBe(tulip % 2);
-      expect(tulipOpen(table.world, 'tulip')).toBe(tulip % 2 === 1);
+      expect(openCount(table) % 2).toBe(tulip % 2);
       expect(economy.paidOut).toBe(START_POCKET_PAYOUT * start + TULIP_PAYOUT * tulip);
+      // Fouls go back to the tray.
       expect(economy.balls + table.world.balls.length).toBe(
         250 - start - out - tulip + economy.paidOut,
       );
+      expect(foul).toBe(0);
     });
 
-    it('plays out identically twice', () => {
+    it('play out identically twice', () => {
       const run = () => {
-        // Seed 3's first two tulip entries are at 30 and 33 s.
-        const table = createTable(tulipBoard, { seed: 3 });
-        table.fire.power = 0;
+        const table = createTable(classic, { seed: 3 });
+        table.fire.power = BEST_POWER;
         table.fire.held = true;
         const out: number[] = [];
-        for (let i = 0; i < steps(35); i++) {
+        for (let i = 0; i < steps(40); i++) {
           stepTable(table);
-          out.push(tulipOpen(table.world, 'tulip') ? 1 : 0);
+          out.push(openCount(table));
           for (const b of table.world.balls) out.push(b.id, b.x, b.y);
         }
         return { out, economy: table.economy };
