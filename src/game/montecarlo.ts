@@ -30,6 +30,7 @@ import { createRng, streamSeed } from '../sim/rng';
 import {
   type Ball,
   type Capture,
+  type Gate,
   SIM_STEP_S,
   removeBall,
   setGateOpen,
@@ -183,7 +184,9 @@ export function runBatch(board: Board, options: BatchOptions): Tally {
   }
   const tulips = tulipIds(board).map((id) => {
     if (mode === 'open') setGateOpen(world, id, true);
-    return { id, tally: (tally.tulips[id] = createTulipTally()) };
+    // The gate itself, so each step reads its state without a search.
+    const gate = world.gates.find((g) => g.id === id) as Gate;
+    return { gate, tally: (tally.tulips[id] = createTulipTally()) };
   });
   const fire = createFireControl(power);
   fire.held = true;
@@ -225,8 +228,8 @@ export function runBatch(board: Board, options: BatchOptions): Tally {
     if (tulips.length > 0) {
       let inPlay = 0;
       for (const ball of world.balls) if (counted(ball)) inPlay += 1;
-      for (const { id, tally: t } of tulips) {
-        if (tulipOpen(world, id)) t.openBallSteps += inPlay;
+      for (const { gate, tally: t } of tulips) {
+        if (gate.open) t.openBallSteps += inPlay;
         else t.closedBallSteps += inPlay;
       }
     }

@@ -167,6 +167,12 @@ export interface World {
   readonly circles: readonly CircleShape[];
   readonly segments: readonly SegmentShape[];
   readonly sensors: readonly SensorShape[];
+  /**
+   * Highest top of any sensor (-Infinity with none). A move that stays above
+   * it can't enter one, so the step skips testing them: on a board, balls
+   * spend most of their flight above every pocket.
+   */
+  readonly sensorsTopY: number;
   readonly bounds: Bounds | null;
   readonly gates: readonly Gate[];
   /** Per segment, 1 if it belongs to a gate in the other state and is skipped. Kept by setGateOpen. */
@@ -222,6 +228,7 @@ export function createWorld(options: WorldOptions = {}): World {
     circles,
     segments,
     sensors,
+    sensorsTopY: Math.max(-Infinity, ...sensors.map((s) => s.maxY)),
     bounds: bounds ?? null,
     gates,
     segmentOff,
@@ -511,11 +518,14 @@ function findStaticEvent(
   // the move) takes the ball where its centre crossed in.
   let sensor: SensorShape | null = null;
   let sensorT = material ? best.t : 1;
-  for (const p of world.sensors) {
-    const t = sensorEntryT(p, x, y, dx, dy);
-    if (t <= sensorT && (!sensor || t < sensorT)) {
-      sensor = p;
-      sensorT = t;
+  // Above every sensor, sensorEntryT would return Infinity for each.
+  if (Math.min(y, y + dy) <= world.sensorsTopY) {
+    for (const p of world.sensors) {
+      const t = sensorEntryT(p, x, y, dx, dy);
+      if (t <= sensorT && (!sensor || t < sensorT)) {
+        sensor = p;
+        sensorT = t;
+      }
     }
   }
   out.sensor = sensor;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSensor, polygonProblem, sensorContains, sensorEntryT } from '../../src/sim/sensor';
+import { addBall, createWorld, stepWorld } from '../../src/sim/world';
 
 const square = createSensor('sq', [
   { x: 0, y: 0 },
@@ -127,5 +128,55 @@ describe('sensorEntryT', () => {
   it('takes the first crossing when a move enters a concave polygon twice', () => {
     // Left to right along y = 0.75: enters the L's upright at x = 0.
     expect(sensorEntryT(ell, -0.5, 0.75, 2, 0)).toBeCloseTo(0.25, 12);
+  });
+});
+
+describe('sensors in a world: skipping them above the highest one', () => {
+  /** A 100 mm wide, 20 mm deep pocket from x0, its top at `top`. */
+  const pocket = (id: string, x0: number, top: number) =>
+    createSensor(id, [
+      { x: x0, y: top },
+      { x: x0 + 0.1, y: top },
+      { x: x0 + 0.1, y: top - 0.02 },
+      { x: x0, y: top - 0.02 },
+    ]);
+  const twoPockets = () =>
+    createWorld({ sensors: [pocket('high', 0, 0.12), pocket('low', 0.2, 0.05)] });
+
+  /** Step until a sensor takes a ball; returns its id, or null. */
+  const run = (world: ReturnType<typeof createWorld>, maxSteps: number): string | null => {
+    for (let i = 0; i < maxSteps; i++) {
+      stepWorld(world);
+      const taken = world.captures[0]?.sensorId;
+      if (taken) return taken;
+    }
+    return null;
+  };
+
+  it('records the highest sensor top, or -Infinity with none', () => {
+    expect(twoPockets().sensorsTopY).toBe(0.12);
+    expect(createWorld().sensorsTopY).toBe(-Infinity);
+  });
+
+  it('still captures balls falling from far above into a high and a low sensor', () => {
+    const high = twoPockets();
+    addBall(high, { x: 0.05, y: 0.4 });
+    expect(run(high, 4000)).toBe('high');
+    const low = twoPockets();
+    addBall(low, { x: 0.25, y: 0.4 });
+    expect(run(low, 4000)).toBe('low');
+  });
+
+  it('captures a fast ball whose single step crosses the highest top into the sensor', () => {
+    const world = twoPockets();
+    // 10 m/s: 5 mm a step, so one step starts above the top and ends inside.
+    addBall(world, { x: 0.05, y: 0.1225, vy: -10 });
+    expect(run(world, 5)).toBe('high');
+  });
+
+  it('captures a ball moving up into a sensor from below', () => {
+    const world = twoPockets();
+    addBall(world, { x: 0.05, y: 0.06, vy: 2 });
+    expect(run(world, 200)).toBe('high');
   });
 });
