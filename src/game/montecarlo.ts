@@ -286,6 +286,9 @@ export interface Summary {
  */
 export interface TulipSummary {
   readonly id: string;
+  /** Counted balls that entered it while open, and while closed. */
+  readonly openEntries: number;
+  readonly closedEntries: number;
   /** Fraction of launched balls that entered it, in either state. */
   readonly entryRate: number;
   readonly openRate: number | null;
@@ -321,6 +324,8 @@ function summarizeTulip(id: string, t: Readonly<TulipTally>, launched: number): 
     steps > 0 ? (entries / steps) * meanFlightSteps : null;
   return {
     id,
+    openEntries: t.openEntries,
+    closedEntries: t.closedEntries,
     entryRate: launched > 0 ? (t.openEntries + t.closedEntries) / launched : 0,
     openRate: rateIn(t.openEntries, t.openBallSteps),
     closedRate: rateIn(t.closedEntries, t.closedBallSteps),

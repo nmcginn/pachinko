@@ -66,7 +66,7 @@ describe('tools/montecarlo.ts', { timeout: 30_000 }, () => {
     expect(open.entries.start).toBe(shut.entries.start);
 
     const text = run(...args, '--open');
-    expect(text.stdout).toContain('gates open');
+    expect(text.stdout).toContain('attacker open');
     expect(text.stdout).toMatch(/attacker +\d+\.\d\d%/);
     expect(run(...args).stdout).not.toContain('attacker');
     const sweep = run('--balls', '100', '--sweep', '0:0.1:0.1', '--workers', '1', '--open');

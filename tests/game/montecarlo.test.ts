@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  type TulipMode,
+  type TulipSummary,
+  type TulipTally,
   MAX_FLIGHT_S,
   TRAFFIC_BALLS,
   addTally,
@@ -10,6 +13,7 @@ import {
 } from '../../src/game/montecarlo';
 import { parseBoard } from '../../src/sim/board';
 import { SIM_STEP_S } from '../../src/sim/world';
+import { tulipBoardData } from '../fixtures/tulipBoard';
 
 const classicData = () => JSON.parse(readFileSync('boards/classic.json', 'utf8'));
 const classic = parseBoard(classicData());
@@ -164,6 +168,141 @@ describe('montecarlo: runBatch', () => {
     expect(() => runBatch(classic, { power: 0, seed: 1, count: 1, maxFlightS: 0 })).toThrow(
       RangeError,
     );
+  });
+});
+
+// M5 acceptance: the Monte Carlo shows a tulip's entry rate rises while it
+// is open. On the test board (tests/fixtures/tulipBoard.ts): the classic
+// board with one tulip, since where tulips go on the classic board is still
+// the maintainer's to decide. Long runs, so a longer timeout.
+describe('montecarlo: tulips', { timeout: 60_000 }, () => {
+  const tulipBoard = parseBoard(tulipBoardData());
+  const run = (tulips: TulipMode, count: number, seed = 1) => {
+    const t = createTally();
+    for (let first = 0; first < count; first += 1000) {
+      const n = Math.min(1000, count - first);
+      addTally(t, runBatch(tulipBoard, { power: 0, seed, first, count: n, tulips }));
+    }
+    return t;
+  };
+
+  it('takes far more balls held open than held closed', () => {
+    const open = run('open', 1000);
+    const closed = run('closed', 1000);
+    const o = summarize(open).tulips[0] as TulipSummary;
+    const c = summarize(closed).tulips[0] as TulipSummary;
+    // About 9.5% open and 1.4% closed (PHYSICS.md, "Gates: tulips"):
+    // with 1000 balls, about 95 and 14 entries.
+    expect(o).toMatchObject({ id: 'tulip', closedRate: null, openShare: 1, closedEntries: 0 });
+    expect(c).toMatchObject({ id: 'tulip', openRate: null, openShare: 0, openEntries: 0 });
+    expect(o.openRate).toBe(o.entryRate);
+    expect(c.closedRate).toBe(c.entryRate);
+    expect(o.openEntries).toBeGreaterThan(3 * c.closedEntries);
+    expect(c.closedEntries).toBeGreaterThan(0);
+    // Nothing above the tulip changes: the balls it doesn't take go on to the out-hole.
+    expect(open.entries.tulip).toBe(o.openEntries);
+    for (const t of [open, closed]) {
+      const { start, out, foul, attacker, tulip } = t.entries;
+      expect(start + out + foul + attacker + tulip + t.lost + t.stuck).toBe(1000);
+      expect(t.stuck + t.lost).toBe(0);
+    }
+  });
+
+  it('in play, opens on one entry and closes on the next, and its rate while open is higher', () => {
+    const t = run('play', 2000);
+    const s = summarize(t).tulips[0] as TulipSummary;
+    expect(s.openRate).not.toBeNull();
+    expect(s.closedRate).not.toBeNull();
+    expect(s.openRate as number).toBeGreaterThan(2 * (s.closedRate as number));
+    // Each entry toggles it, traffic's too, so counted entries split about evenly.
+    expect(s.openEntries + s.closedEntries).toBe(t.entries.tulip);
+    expect(s.openEntries).toBeGreaterThan(0);
+    expect(s.closedEntries).toBeGreaterThan(0);
+    expect(s.openShare).toBeGreaterThan(0);
+    expect(s.openShare).toBeLessThan(0.5);
+    expect(t.stuck + t.lost).toBe(0);
+    const { start, out, foul, attacker, tulip } = t.entries;
+    expect(start + out + foul + attacker + tulip).toBe(2000);
+  });
+
+  it('gives the same tally for the same seed, tulip state and all', () => {
+    const a = runBatch(tulipBoard, { power: 0, seed: 4, count: 300 });
+    expect(a.entries.tulip).toBeGreaterThan(0);
+    expect(runBatch(tulipBoard, { power: 0, seed: 4, count: 300 })).toEqual(a);
+  });
+
+  it('holds the attacker open with gatesOpen, and leaves the tulip to play', () => {
+    const t = runBatch(tulipBoard, { power: 0, seed: 1, count: 200, gatesOpen: true });
+    expect(t.entries.attacker).toBeGreaterThan(0);
+    const s = t.tulips['tulip'] as TulipTally;
+    expect(s.closedBallSteps).toBeGreaterThan(0);
+  });
+
+  it('tallies a board with no tulips with none, and zero balls with zero', () => {
+    expect(runBatch(classic, { power: 0, seed: 1, count: 5 }).tulips).toEqual({});
+    const none = runBatch(tulipBoard, { power: 0, seed: 1, count: 0 });
+    expect(none.tulips).toEqual({
+      tulip: { openEntries: 0, closedEntries: 0, openBallSteps: 0, closedBallSteps: 0 },
+    });
+    expect(summarize(none).tulips).toEqual([
+      {
+        id: 'tulip',
+        openEntries: 0,
+        closedEntries: 0,
+        entryRate: 0,
+        openRate: null,
+        closedRate: null,
+        openShare: 0,
+      },
+    ]);
+  });
+
+  it('rejects an unknown tulip mode', () => {
+    expect(() =>
+      runBatch(tulipBoard, { power: 0, seed: 1, count: 1, tulips: 'ajar' as TulipMode }),
+    ).toThrow(/tulips must be one of play, open, closed/);
+  });
+});
+
+describe('montecarlo: addTally and summarize with tulips', () => {
+  it('adds tulip tallies by id, keeping ids only one side has', () => {
+    const a = createTally();
+    const b = createTally();
+    a.tulips['left'] = { openEntries: 1, closedEntries: 2, openBallSteps: 10, closedBallSteps: 20 };
+    b.tulips['left'] = { openEntries: 3, closedEntries: 4, openBallSteps: 30, closedBallSteps: 40 };
+    b.tulips['right'] = { openEntries: 5, closedEntries: 0, openBallSteps: 50, closedBallSteps: 0 };
+    b.entries.tulip = 12;
+    addTally(a, b);
+    expect(a.tulips).toEqual({
+      left: { openEntries: 4, closedEntries: 6, openBallSteps: 40, closedBallSteps: 60 },
+      right: { openEntries: 5, closedEntries: 0, openBallSteps: 50, closedBallSteps: 0 },
+    });
+    expect(a.entries.tulip).toBe(12);
+    // b is unchanged.
+    expect(b.tulips['left']?.openEntries).toBe(3);
+  });
+
+  it('turns ball-time in each state into entries per ball launched', () => {
+    const t = createTally();
+    t.launched = 100;
+    t.entries.tulip = 6;
+    // 100 balls, 4000 steps each in play: 400 000 ball-steps, a quarter of them open.
+    t.tulips['t'] = { openEntries: 4, closedEntries: 2, openBallSteps: 1e5, closedBallSteps: 3e5 };
+    const s = summarize(t);
+    expect(s.tulipRate).toBeCloseTo(0.06, 12);
+    const tulip = s.tulips[0] as TulipSummary;
+    expect(tulip.entryRate).toBeCloseTo(0.06, 12);
+    expect(tulip.openShare).toBeCloseTo(0.25, 12);
+    // Open: 4 per 1e5 ball-steps, times 4000 steps a ball: 0.16. Closed: 2 per 3e5: 0.0267.
+    expect(tulip.openRate).toBeCloseTo(0.16, 12);
+    expect(tulip.closedRate).toBeCloseTo(2 / 75, 12);
+  });
+
+  it('lists tulips in id order', () => {
+    const t = createTally();
+    t.tulips['b'] = { openEntries: 0, closedEntries: 0, openBallSteps: 0, closedBallSteps: 0 };
+    t.tulips['a'] = { openEntries: 0, closedEntries: 0, openBallSteps: 0, closedBallSteps: 0 };
+    expect(summarize(t).tulips.map((x) => x.id)).toEqual(['a', 'b']);
   });
 });
 

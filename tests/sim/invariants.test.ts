@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { type Material, CONTACT_SLOP_M, createCircle, createPolyline } from '../../src/sim/collide';
+import { createBoardWorld, parseBoard } from '../../src/sim/board';
 import { createRng } from '../../src/sim/rng';
 import {
   type Ball,
@@ -18,9 +19,11 @@ import {
   ballEnergyJ,
   createWorld,
   overlapsBall,
+  setGateOpen,
   stepWorld,
   totalEnergyJ,
 } from '../../src/sim/world';
+import { TULIP_MOUTH_Y_M, TULIP_X_M, tulipBoardData } from '../fixtures/tulipBoard';
 import {
   GRID_DROP_Y_M,
   GRID_EXIT_Y_M,
@@ -508,3 +511,123 @@ describe('invariant with many balls colliding: determinism', () => {
 function snapshotBalls(world: World): number[] {
   return world.balls.flatMap((b) => [b.id, b.x, b.y, b.vx, b.vy]);
 }
+
+// M5 tulips: the invariants with gate geometry switching on as well as off.
+// A tulip's wings appear and disappear while balls fly round them; a switch
+// may take a ball into the pocket (setGateOpen) but must never leave one
+// inside geometry, and never add energy.
+
+/** Clearance as clearanceM, counting only the segments solid now. */
+function liveClearanceM(world: World, x: number, y: number): number {
+  let min = Infinity;
+  for (const c of world.circles) {
+    min = Math.min(min, Math.hypot(x - c.x, y - c.y) - c.radiusM - BALL_RADIUS_M);
+  }
+  world.segments.forEach((s, i) => {
+    if (world.segmentOff[i]) return;
+    const along = Math.min(s.lengthM, Math.max(0, (x - s.ax) * s.ux + (y - s.ay) * s.uy));
+    min = Math.min(
+      min,
+      Math.hypot(x - (s.ax + s.ux * along), y - (s.ay + s.uy * along)) - BALL_RADIUS_M,
+    );
+  });
+  return min;
+}
+
+/** The tulip board's world with 30 balls in the field above and round the tulip, at random speeds up to `maxSpeedMps`. */
+function tulipScene(seed: number, maxSpeedMps: number): World {
+  const world = createBoardWorld(parseBoard(tulipBoardData()));
+  const rng = createRng(seed);
+  while (world.balls.length < 30) {
+    const x = TULIP_X_M + rng.range(-0.035, 0.035);
+    const y = TULIP_MOUTH_Y_M + rng.range(0.005, 0.15);
+    const angle = rng.range(0, 2 * Math.PI);
+    const speed = rng.range(0, maxSpeedMps);
+    if (liveClearanceM(world, x, y) < 0 || overlapsBall(world, x, y)) continue;
+    addBall(world, { x, y, vx: speed * Math.cos(angle), vy: speed * Math.sin(angle) });
+  }
+  return world;
+}
+
+/** Toggle the tulip every 20 ms, far more often than play does, so wings switch round balls in flight. */
+const TOGGLE_STEPS = steps(0.02);
+
+// The tunnelling check walks every ball every step: a few seconds, so a longer timeout.
+describe(
+  'invariant with tulips switching: energy, no tunnelling, determinism',
+  { timeout: 30_000 },
+  () => {
+    it('never raises total energy, a switch included, 30 balls round a tulip', () => {
+      for (const seed of [1, 2]) {
+        const world = tulipScene(seed, 1);
+        let previous = totalEnergyJ(world);
+        for (let i = 0; i < steps(2); i++) {
+          if (i % TOGGLE_STEPS === 0) {
+            setGateOpen(world, 'tulip', !world.gates.find((g) => g.id === 'tulip')?.open);
+            const now = totalEnergyJ(world);
+            if (!(now <= previous))
+              throw new Error(`a switch raised energy by ${now - previous} J`);
+            previous = now;
+          }
+          stepWorld(world);
+          const now = totalEnergyJ(world);
+          if (!(now <= previous)) {
+            throw new Error(`total energy rose by ${now - previous} J on step ${i} (seed ${seed})`);
+          }
+          previous = now;
+        }
+      }
+    });
+
+    it('never leaves a ball inside a wing, a nail, a rail or a ball, 30 balls at max launch speed', () => {
+      let swept = 0;
+      for (const seed of [3, 4]) {
+        const world = tulipScene(seed, MAX_LAUNCH_SPEED_MPS);
+        for (let i = 0; i < steps(1); i++) {
+          if (i % TOGGLE_STEPS === 0) {
+            swept += setGateOpen(
+              world,
+              'tulip',
+              !world.gates.find((g) => g.id === 'tulip')?.open,
+            ).length;
+            for (const ball of world.balls) {
+              expect(liveClearanceM(world, ball.x, ball.y)).toBeGreaterThanOrEqual(-CONTACT_SLOP_M);
+            }
+          }
+          stepWorld(world);
+          expect(minPairGapM(world)).toBeGreaterThanOrEqual(-CONTACT_SLOP_M);
+          for (const ball of world.balls) {
+            expect(liveClearanceM(world, ball.x, ball.y)).toBeGreaterThanOrEqual(-CONTACT_SLOP_M);
+          }
+        }
+      }
+      // The scene is busy enough that switching does land on balls, and takes them in.
+      expect(swept).toBeGreaterThan(0);
+    });
+
+    it('gives identical trajectories for the same seed, wings switching', () => {
+      const run = (seed: number) => {
+        const world = tulipScene(seed, 1);
+        const out: number[] = [];
+        for (let i = 0; i < steps(1); i++) {
+          if (i % TOGGLE_STEPS === 0) {
+            for (const c of setGateOpen(world, 'tulip', !world.gates[world.gates.length - 1]?.open))
+              out.push(-c.ball.id);
+          }
+          stepWorld(world);
+          out.push(...snapshotBalls(world));
+        }
+        return out;
+      };
+      const a = run(9);
+      const b = run(9);
+      expect(a.length).toBeGreaterThan(0);
+      expect(b.length).toBe(a.length);
+      for (let i = 0; i < a.length; i++) {
+        if (!Object.is(a[i], b[i]))
+          throw new Error(`runs diverge at index ${i}: ${a[i]} vs ${b[i]}`);
+      }
+      expect(run(10)).not.toEqual(a);
+    });
+  },
+);

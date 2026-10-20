@@ -3,6 +3,7 @@ import {
   ATTACKER_PAYOUT,
   START_POCKET_PAYOUT,
   STARTING_BALLS,
+  TULIP_PAYOUT,
   createEconomy,
   recordEntry,
   takeBallForLaunch,
@@ -41,6 +42,16 @@ describe('economy', () => {
     recordEntry(e, 'out');
     expect(e.entries).toEqual({ start: 0, out: 2, foul: 0, attacker: 0, tulip: 0 });
     expect(e).toMatchObject({ balls: 10, paidOut: 0 });
+  });
+
+  it('pays TULIP_PAYOUT into the tray for each tulip entry, open or closed', () => {
+    // Provisional: the payout is an open question for the maintainer (PLAN.md).
+    expect(TULIP_PAYOUT).toBe(3);
+    const e = createEconomy(0);
+    recordEntry(e, 'tulip');
+    recordEntry(e, 'tulip');
+    expect(e).toMatchObject({ balls: 2 * TULIP_PAYOUT, paidOut: 2 * TULIP_PAYOUT });
+    expect(e.entries.tulip).toBe(2);
   });
 
   it('pays 3 balls into the tray for each start-pocket entry', () => {
