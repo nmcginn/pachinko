@@ -14,7 +14,7 @@ describe('economy', () => {
     expect(createEconomy()).toEqual({
       balls: 250,
       launched: 0,
-      entries: { start: 0, out: 0, foul: 0, attacker: 0 },
+      entries: { start: 0, out: 0, foul: 0, attacker: 0, tulip: 0 },
       paidOut: 0,
     });
   });
@@ -39,7 +39,7 @@ describe('economy', () => {
     const e = createEconomy(10);
     recordEntry(e, 'out');
     recordEntry(e, 'out');
-    expect(e.entries).toEqual({ start: 0, out: 2, foul: 0, attacker: 0 });
+    expect(e.entries).toEqual({ start: 0, out: 2, foul: 0, attacker: 0, tulip: 0 });
     expect(e).toMatchObject({ balls: 10, paidOut: 0 });
   });
 

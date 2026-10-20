@@ -22,6 +22,7 @@ import {
   enterStart,
   stepMachine,
 } from './machine';
+import { enterTulip } from './tulip';
 
 export interface Table {
   readonly board: Board;
@@ -66,7 +67,9 @@ export function createTable(board: Board, options: TableOptions = {}): Table {
  * last ball has cleared the launch point (balls collide since M5), step
  * the world, pay and report the step's pocket entries, step the machine, then
  * open or close the attacker to match it. A ball the closing lid sweeps in
- * pays like any other attacker entry, after the round has ended.
+ * pays like any other attacker entry, after the round has ended. Each tulip
+ * entry opens or closes that tulip at once, and a ball its moving wings
+ * sweep in is an entry too, recorded in turn.
  */
 export function stepTable(table: Table): void {
   const { board, world, economy, fire, machine, rng } = table;
@@ -91,5 +94,6 @@ function recordCaptures(table: Table, captures: readonly Capture[]): void {
     recordEntry(table.economy, kind);
     if (kind === 'start') enterStart(table.machine);
     else if (kind === 'attacker') enterAttacker(table.machine);
+    else if (kind === 'tulip') recordCaptures(table, enterTulip(table.world, capture.sensorId));
   }
 }

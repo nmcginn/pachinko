@@ -189,6 +189,8 @@ describe('montecarlo: summarize', () => {
       attackerRate: 0,
       spinsPer1000Yen: 0,
       spinsPer1000YenSe: 0,
+      tulipRate: 0,
+      tulips: [],
     });
   });
 });

@@ -251,7 +251,7 @@ describe('parseBoard', () => {
       const world = createBoardWorld(board);
       // The bowl's 2 segments, then the lid's 2.
       expect(world.gates).toEqual([
-        { id: 'attacker', sensorId: 'attacker', segments: [2, 3], open: false },
+        { id: 'attacker', sensorId: 'attacker', segments: [2, 3], openSegments: [], open: false },
       ]);
       expect(world.segments).toHaveLength(4);
     });
@@ -315,7 +315,7 @@ describe('parseBoard', () => {
   it('rejects bad pockets', () => {
     const out = (minimal()['pockets'] as unknown[])[0] as Record<string, unknown>;
     expect(issues(edit((b) => (b['pockets'] = [{ ...out, kind: 'jackpot' }])))).toEqual([
-      'pockets[0].kind: must be one of start, out, foul, attacker, got jackpot',
+      'pockets[0].kind: must be one of start, out, foul, attacker, tulip, got jackpot',
       'pockets: needs at least one "out" pocket, or balls can never leave',
     ]);
     expect(

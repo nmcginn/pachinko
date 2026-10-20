@@ -9,14 +9,18 @@
 //     "nails": [[x, y], …],                         // brass nails, NAIL_RADIUS_M each
 //     "rails": [{ "id": "outer", "points": [[x, y], …] }, …],   // polylines
 //     "pockets": [{ "id": "start", "kind": "start", "polygon": [[x, y], …] }, …],
-//                                                   // an "attacker" also has a "lid": [[x, y], …]
+//                                                   // an "attacker" also has a "lid": [[x, y], …];
+//                                                   // a "tulip" has "wings": { "closed": [polyline, …], "open": [polyline, …] }
 //     "launcher": { "x": …, "y": …, "angleDeg": …, "minSpeedMps": … }
 //   }
 //
 // Pockets are sensor regions: a ball whose centre enters one leaves play.
 // Their physical walls, if any, are rails. An attacker's lid is a polyline
 // that closes over its mouth: the world makes it a gate, closed at the start,
-// and the game opens it for jackpot rounds (M4). `parseBoard` checks everything it
+// and the game opens it for jackpot rounds (M4). A tulip's wings are
+// polylines in two shapes, one solid while it is closed and one while it is
+// open: the world makes them a gate too, closed at the start, and the game
+// opens and closes it on each entry (M5). `parseBoard` checks everything it
 // can about the data up front and reports every problem it finds at once,
 // each with the path of the offending item, so a hand-edited board fails
 // loudly at load time rather than as a ball doing something odd.
@@ -36,6 +40,8 @@ import {
   addBall,
   createWorld,
   overlapsBall,
+  removeBall,
+  setGateOpen,
 } from './world';
 
 /**
@@ -46,8 +52,11 @@ import {
  *   reports the capture and the economy returns the ball.
  * - `attacker`: the attacker (アタッカー), the big pocket that opens for
  *   jackpot rounds. Has a lid, closed except during a round (M4).
+ * - `tulip`: a side pocket (チューリップ) with wings. An entry into a closed
+ *   tulip opens it, spreading its wings to catch more; the next entry
+ *   closes it (M5).
  */
-export const POCKET_KINDS = ['start', 'out', 'foul', 'attacker'] as const;
+export const POCKET_KINDS = ['start', 'out', 'foul', 'attacker', 'tulip'] as const;
 export type PocketKind = (typeof POCKET_KINDS)[number];
 
 export interface Rail {
@@ -61,6 +70,15 @@ export interface Pocket {
   readonly polygon: readonly Vec2[];
   /** Attackers only: the lid over the mouth, a polyline. Solid while the gate is closed. */
   readonly lid?: readonly Vec2[];
+  /** Tulips only: the wings, as polylines, in each state. */
+  readonly wings?: Wings;
+}
+
+export interface Wings {
+  /** Solid while the tulip is closed. */
+  readonly closed: readonly (readonly Vec2[])[];
+  /** Solid while it is open. */
+  readonly open: readonly (readonly Vec2[])[];
 }
 
 export interface Launcher {
@@ -176,8 +194,9 @@ const fmt = (p: Vec2) => `(${p.x}, ${p.y})`;
  * problem found. Checks shape and types, that all geometry lies on the board,
  * that nails don't overlap, rails have distinct consecutive points, pockets
  * are simple polygons, ids are unique, there is an out-hole for balls to
- * leave by, attackers (and only attackers) have a lid, and the launcher
- * sits clear of geometry with a usable speed range.
+ * leave by, attackers (and only attackers) have a lid, tulips (and only
+ * tulips) have wings in both shapes, and the launcher sits clear of
+ * geometry, with every gate in either state, with a usable speed range.
  */
 export function parseBoard(data: unknown): Board {
   const c = new Checker();
@@ -223,8 +242,8 @@ export function parseBoard(data: unknown): Board {
     }
   }
 
-  /** A rail or lid: at least 2 points, all on the board, no point repeating the one before. */
-  const polyline = (v: unknown, path: string, what: 'rail' | 'lid'): Vec2[] | null => {
+  /** A rail, lid or wing: at least 2 points, all on the board, no point repeating the one before. */
+  const polyline = (v: unknown, path: string, what: 'rail' | 'lid' | 'wing'): Vec2[] | null => {
     const points = c.points(v, path);
     if (!points) return null;
     if (points.length < 2) {
@@ -241,6 +260,29 @@ export function parseBoard(data: unknown): Board {
       }
     });
     return ok ? points : null;
+  };
+
+  /** A tulip's wings: both shapes present, each a non-empty list of polylines. */
+  const wingShapes = (v: unknown, path: string): Wings | null => {
+    const w = c.object(v, path, ['closed', 'open']);
+    if (!w) return null;
+    const shape = (key: 'closed' | 'open'): Vec2[][] | null => {
+      const list = c.array(w[key], `${path}.${key}`);
+      if (!list) return null;
+      if (list.length === 0) {
+        c.fail(`${path}.${key}`, 'needs at least one wing polyline');
+        return null;
+      }
+      const out: Vec2[][] = [];
+      list.forEach((p, k) => {
+        const points = polyline(p, `${path}.${key}[${k}]`, 'wing');
+        if (points) out.push(points);
+      });
+      return out.length === list.length ? out : null;
+    };
+    const closed = shape('closed');
+    const open = shape('open');
+    return closed && open ? { closed, open } : null;
   };
 
   // Rails.
@@ -264,7 +306,7 @@ export function parseBoard(data: unknown): Board {
   const pocketIds = new Set<string>();
   c.array(root['pockets'], 'pockets')?.forEach((v, i) => {
     const path = `pockets[${i}]`;
-    const o = c.object(v, path, ['id', 'kind', 'polygon', 'lid']);
+    const o = c.object(v, path, ['id', 'kind', 'polygon', 'lid', 'wings']);
     if (!o) return;
     const id = c.string(o['id'], `${path}.id`);
     if (id !== null) {
@@ -288,13 +330,34 @@ export function parseBoard(data: unknown): Board {
       lid = polyline(o['lid'], `${path}.lid`, 'lid');
       lidOk = lid !== null;
     }
+    let wings: Wings | null = null;
+    let wingsOk = true;
+    if (kind === 'tulip' && o['wings'] === undefined) {
+      c.fail(
+        `${path}.wings`,
+        'a tulip needs wings, { "closed": [polyline, …], "open": [polyline, …] }',
+      );
+      wingsOk = false;
+    } else if (validKind && kind !== 'tulip' && o['wings'] !== undefined) {
+      c.fail(`${path}.wings`, `only tulip pockets have wings, not "${String(kind)}"`);
+      wingsOk = false;
+    } else if (o['wings'] !== undefined) {
+      wings = wingShapes(o['wings'], `${path}.wings`);
+      wingsOk = wings !== null;
+    }
     const polygon = c.points(o['polygon'], `${path}.polygon`);
     if (!polygon) return;
     polygon.forEach((p, k) => onBoard(p, `${path}.polygon[${k}]`));
     const problem = polygonProblem(polygon);
     if (problem) c.fail(`${path}.polygon`, problem);
-    if (id !== null && validKind && !problem && lidOk) {
-      pockets.push({ id, kind: kind as PocketKind, polygon, ...(lid ? { lid } : {}) });
+    if (id !== null && validKind && !problem && lidOk && wingsOk) {
+      pockets.push({
+        id,
+        kind: kind as PocketKind,
+        polygon,
+        ...(lid ? { lid } : {}),
+        ...(wings ? { wings } : {}),
+      });
     }
   });
   if (Array.isArray(root['pockets']) && !pockets.some((p) => p.kind === 'out')) {
@@ -326,13 +389,20 @@ export function parseBoard(data: unknown): Board {
 
   const board: Board = { name, widthM, heightM, nails, rails, pockets, launcher };
 
-  // Checks that need the assembled geometry.
+  // Checks that need the assembled geometry. The launch point must be clear
+  // with gates in either state: a tulip opening adds wings.
   const world = createBoardWorld(board);
   const at = { x: launcher.x, y: launcher.y };
-  try {
-    addBall(world, at);
-  } catch {
-    c.fail('launcher', `a ball at ${fmt(at)} would overlap a nail or rail`);
+  const states = world.gates.length > 0 ? [false, true] : [false];
+  for (const open of states) {
+    for (const gate of world.gates) setGateOpen(world, gate.id, open);
+    try {
+      addBall(world, at);
+    } catch {
+      const state = open ? ' with every gate open' : '';
+      c.fail('launcher', `a ball at ${fmt(at)} would overlap a nail or rail${state}`);
+    }
+    for (const ball of [...world.balls]) removeBall(world, ball.id);
   }
   const inPocket = world.sensors.find((s) => sensorContains(s, at.x, at.y));
   if (inPocket) c.fail('launcher', `${fmt(at)} is inside pocket "${inPocket.id}"`);
@@ -349,17 +419,31 @@ const BOUNDS_MARGIN_M = 0.05;
 
 /**
  * Build the sim world for a board: nails, rails, pockets as sensors, bounds,
- * and a gate for each attacker's lid, closed, with the pocket's id. Balls
- * collide with each other (M5).
+ * and a gate for each attacker's lid and each tulip's wings, closed, with
+ * the pocket's id. Balls collide with each other (M5).
  */
 export function createBoardWorld(board: Board): World {
   return createWorld({
     circles: board.nails.map((p) => createCircle(p, NAIL_RADIUS_M, NAIL_MATERIAL)),
     segments: board.rails.flatMap((r) => createPolyline(r.points, RAIL_MATERIAL)),
     sensors: board.pockets.map((p) => createSensor(p.id, p.polygon)),
-    gates: board.pockets.flatMap((p) =>
-      p.lid ? [{ id: p.id, segments: createPolyline(p.lid, RAIL_MATERIAL), sensorId: p.id }] : [],
-    ),
+    gates: board.pockets.flatMap((p) => {
+      if (p.lid)
+        return [{ id: p.id, segments: createPolyline(p.lid, RAIL_MATERIAL), sensorId: p.id }];
+      if (p.wings) {
+        const shape = (lines: Wings['closed']) =>
+          lines.flatMap((line) => createPolyline(line, RAIL_MATERIAL));
+        return [
+          {
+            id: p.id,
+            segments: shape(p.wings.closed),
+            openSegments: shape(p.wings.open),
+            sensorId: p.id,
+          },
+        ];
+      }
+      return [];
+    }),
     ballCollisions: true,
     bounds: {
       minX: -BOUNDS_MARGIN_M,
@@ -386,8 +470,9 @@ export function launchSpeedMps(launcher: Launcher, power: number): number {
 
 /**
  * Whether a ball can be launched now: no ball sits at the launch point.
- * Nails and rails can't: parseBoard checks the launch point is clear of
- * them, with every lid closed, and opening a lid only takes a rail away.
+ * Nails, rails and gates can't: parseBoard checks the launch point is clear
+ * of them with every gate closed and with every gate open, and each gate's
+ * geometry depends on its own state alone.
  */
 export function launcherClear(world: World, board: Board): boolean {
   return !overlapsBall(world, board.launcher.x, board.launcher.y);

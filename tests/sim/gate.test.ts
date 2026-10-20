@@ -61,7 +61,9 @@ describe('gates', () => {
   it('appends lid segments after the rails and starts closed', () => {
     const world = boxWorld();
     expect(world.segments).toHaveLength(4);
-    expect(world.gates).toEqual([{ id: 'g', sensorId: 'pocket', segments: [3], open: false }]);
+    expect(world.gates).toEqual([
+      { id: 'g', sensorId: 'pocket', segments: [3], openSegments: [], open: false },
+    ]);
     expect([...world.segmentOff]).toEqual([0, 0, 0, 0]);
     expect(boxWorld({ open: true }).segmentOff[3]).toBe(1);
   });
@@ -152,7 +154,7 @@ describe('gates', () => {
     expect(trace(true)).toEqual(trace(false));
   });
 
-  it('rejects an unknown gate, a duplicate id, a missing sensor, or an empty lid', () => {
+  it('rejects an unknown gate, a duplicate id, a missing sensor, or a gate with no segments', () => {
     expect(() => setGateOpen(boxWorld(), 'nope', true)).toThrow(/no gate "nope"/);
     const lid = createPolyline(pts([0, 0], [1, 0]), RAIL_MATERIAL);
     const sensors = [createSensor('s', pts([0, 0], [1, 0], [1, -1]))];
@@ -170,6 +172,6 @@ describe('gates', () => {
     ).toThrow(/sensor "x"/);
     expect(() =>
       createWorld({ sensors, gates: [{ id: 'a', segments: [], sensorId: 's' }] }),
-    ).toThrow(/no lid segments/);
+    ).toThrow(/has no segments/);
   });
 });
