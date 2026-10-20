@@ -37,6 +37,16 @@ import {
 import { type Candidates, type StaticGrid, createStaticGrid, queryGrid } from './broadphase';
 import { type SensorShape, sensorEntryT } from './sensor';
 
+// The functions the step's inner loops call, read once. Under tsx (the
+// Monte Carlo CLI, its worker threads, and the tests) each module's exports
+// are getters, so every call through an import pays one; in findStaticEvent
+// that was about 7% of a Monte Carlo run. They never change, so the copies
+// are the same functions.
+const queryGridFn = queryGrid;
+const sweepDiscFn = sweepDisc;
+const sweepCapsuleFn = sweepCapsule;
+const sensorEntryTFn = sensorEntryT;
+
 /** Sim timestep. PLAN.md: 1/2000 s or finer, so a ball at max launch speed moves less than its radius per step. */
 export const SIM_STEP_S = 1 / 2000;
 
@@ -482,14 +492,14 @@ function findStaticEvent(
   best.t = Infinity;
 
   if (world.grid) {
-    queryGrid(world.grid, x, y, x + dx, y + dy, candidates);
+    queryGridFn(world.grid, x, y, x + dx, y + dy, candidates);
   } else {
     everyShape(world, candidates);
   }
   const { segmentOff } = world;
   for (const ci of candidates.circles) {
     const c = world.circles[ci] as CircleShape;
-    if (sweepDisc(x, y, dx, dy, c.x, c.y, BALL_RADIUS_M + c.radiusM, hit)) {
+    if (sweepDiscFn(x, y, dx, dy, c.x, c.y, BALL_RADIUS_M + c.radiusM, hit)) {
       if (hit.t < best.t) {
         best.t = hit.t;
         best.nx = hit.nx;
@@ -502,7 +512,7 @@ function findStaticEvent(
   for (const si of candidates.segments) {
     if (segmentOff[si]) continue;
     const s = world.segments[si] as SegmentShape;
-    if (sweepCapsule(x, y, dx, dy, s, BALL_RADIUS_M, hit)) {
+    if (sweepCapsuleFn(x, y, dx, dy, s, BALL_RADIUS_M, hit)) {
       if (hit.t < best.t) {
         best.t = hit.t;
         best.nx = hit.nx;
@@ -521,7 +531,7 @@ function findStaticEvent(
   // Above every sensor, sensorEntryT would return Infinity for each.
   if (Math.min(y, y + dy) <= world.sensorsTopY) {
     for (const p of world.sensors) {
-      const t = sensorEntryT(p, x, y, dx, dy);
+      const t = sensorEntryTFn(p, x, y, dx, dy);
       if (t <= sensorT && (!sensor || t < sensorT)) {
         sensor = p;
         sensorT = t;

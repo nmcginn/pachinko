@@ -149,41 +149,49 @@ describe('table', () => {
     expect(b.economy).toEqual(a.economy);
   });
 
-  it('plays a forced jackpot through 10 rounds, the attacker opening only for each round', () => {
-    const table = createTable(classic, { seed: 5, jackpotProbability: 0 });
-    const { machine, world, economy } = table;
-    table.fire.power = BEST_POWER;
-    table.fire.held = true;
-    const gate = world.gates[0];
-    expect(gate?.id).toBe('attacker');
-    forceJackpot(machine);
-    let opened = 0;
-    let wasOpen = false;
-    const roundEnds: number[] = [];
-    for (let i = 0; i < steps(400) && !(machine.roundsPlayed === ROUNDS); i++) {
-      stepTable(table);
-      // The world's gate follows the machine on every step.
-      expect(gate?.open).toBe(attackerOpen(machine));
-      if (gate?.open && !wasOpen) opened += 1;
-      if (wasOpen && !gate?.open) roundEnds.push(world.timeS);
-      wasOpen = gate?.open ?? false;
-    }
-    expect(machine.roundsPlayed).toBe(ROUNDS);
-    expect(opened).toBe(ROUNDS);
-    expect(roundEnds).toHaveLength(ROUNDS);
-    // Over; any spins held during the rounds play now.
-    expect(machine.phase.kind).not.toBe('jackpot');
-    expect(machine.jackpots).toBe(1);
-    // Firing at the auto-fire rate, the attacker took balls, and each paid 15.
-    const { start, out, attacker, tulip } = economy.entries;
-    expect(attacker).toBeGreaterThan(ROUNDS * 5);
-    expect(economy.paidOut).toBe(
-      START_POCKET_PAYOUT * start + ATTACKER_PAYOUT * attacker + TULIP_PAYOUT * tulip,
-    );
-    expect(economy.balls + world.balls.length).toBe(
-      250 - start - out - attacker - tulip + economy.paidOut,
-    );
-  });
+  // Over two minutes of sim time, stepped one by one: about 3 s locally,
+  // longer on a shared CI runner, so more than vitest's 5 s default.
+  it(
+    'plays a forced jackpot through 10 rounds, the attacker opening only for each round',
+    {
+      timeout: 30_000,
+    },
+    () => {
+      const table = createTable(classic, { seed: 5, jackpotProbability: 0 });
+      const { machine, world, economy } = table;
+      table.fire.power = BEST_POWER;
+      table.fire.held = true;
+      const gate = world.gates[0];
+      expect(gate?.id).toBe('attacker');
+      forceJackpot(machine);
+      let opened = 0;
+      let wasOpen = false;
+      const roundEnds: number[] = [];
+      for (let i = 0; i < steps(400) && !(machine.roundsPlayed === ROUNDS); i++) {
+        stepTable(table);
+        // The world's gate follows the machine on every step.
+        expect(gate?.open).toBe(attackerOpen(machine));
+        if (gate?.open && !wasOpen) opened += 1;
+        if (wasOpen && !gate?.open) roundEnds.push(world.timeS);
+        wasOpen = gate?.open ?? false;
+      }
+      expect(machine.roundsPlayed).toBe(ROUNDS);
+      expect(opened).toBe(ROUNDS);
+      expect(roundEnds).toHaveLength(ROUNDS);
+      // Over; any spins held during the rounds play now.
+      expect(machine.phase.kind).not.toBe('jackpot');
+      expect(machine.jackpots).toBe(1);
+      // Firing at the auto-fire rate, the attacker took balls, and each paid 15.
+      const { start, out, attacker, tulip } = economy.entries;
+      expect(attacker).toBeGreaterThan(ROUNDS * 5);
+      expect(economy.paidOut).toBe(
+        START_POCKET_PAYOUT * start + ATTACKER_PAYOUT * attacker + TULIP_PAYOUT * tulip,
+      );
+      expect(economy.balls + world.balls.length).toBe(
+        250 - start - out - attacker - tulip + economy.paidOut,
+      );
+    },
+  );
 
   it('keeps the attacker shut outside a jackpot', () => {
     const table = createTable(classic, { seed: 1, jackpotProbability: 0 });
