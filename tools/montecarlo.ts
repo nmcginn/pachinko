@@ -12,7 +12,8 @@
 // batches of BATCH_BALLS, each its own world (with uncounted traffic either
 // side; see src/game/montecarlo.ts), and their integer tallies add up the
 // same in any order. Stdout is therefore byte-for-byte identical across
-// runs; timing goes to stderr.
+// runs; timing goes to stderr. On a board with tulips (M5) it also prints
+// each tulip's entry rate, and its rate while open and while closed.
 
 import { readFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
@@ -22,6 +23,8 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import {
   type Summary,
   type Tally,
+  type TulipMode,
+  TULIP_MODES,
   addTally,
   createTally,
   runBatch,
@@ -34,17 +37,22 @@ const USAGE = `Usage: npx tsx tools/montecarlo.ts [options]
 Launch balls on a board headlessly, at the auto-fire rate (100 a minute)
 so they collide as in play, and print start-pocket rate, out rate, and
 spins per ¥1000 (start-pocket entries per 250 balls launched).
-Gates (the attacker) stay closed, as in normal play, unless --open.
+The attacker stays closed, as in normal play, unless --open. Tulips open
+and close on entries, as in play, unless --tulips holds them.
 
 Options:
-  --board <name>         Board in boards/<name>.json (default: classic)
+  --board <name|path>    Board in boards/<name>.json, or a path to a board
+                         .json file (default: classic)
   --balls <n>            Balls to launch, per power (default: 100000)
   --power <0..1>         Launch handle power (default: 0.62)
   --sweep <from:to:step> Run every power from..to in steps, print a table,
                          and mark the best. Replaces --power.
   --seed <n>             RNG seed, an integer in [0, 2^32) (default: 1)
-  --open                 Hold every gate (the attacker) open for the whole
-                         run, to measure what it catches in a jackpot round
+  --open                 Hold the attacker open for the whole run, to
+                         measure what it catches in a jackpot round
+  --tulips <mode>        play: an entry opens a closed tulip and closes an
+                         open one (default). open, closed: hold every tulip
+                         in that state for the whole run
   --workers <n>          Worker threads (default: one per CPU, up to 8).
                          Changes speed only, never results.
   --json                 Print results as JSON instead of text
@@ -64,6 +72,7 @@ interface Job {
   readonly power: number;
   readonly seed: number;
   readonly gatesOpen: boolean;
+  readonly tulips: TulipMode;
   readonly first: number;
   readonly count: number;
 }
@@ -105,8 +114,11 @@ function parseSweep(raw: string): number[] {
 }
 
 function loadBoard(name: string): { board: Board; data: unknown } {
-  if (!/^[\w-]+$/.test(name)) fail(`--board must be a board name like "classic", got "${name}"`);
-  const path = fileURLToPath(new URL(`../boards/${name}.json`, import.meta.url));
+  const isPath = name.endsWith('.json');
+  if (!isPath && !/^[\w-]+$/.test(name)) {
+    fail(`--board must be a board name like "classic" or a path to a .json file, got "${name}"`);
+  }
+  const path = isPath ? name : fileURLToPath(new URL(`../boards/${name}.json`, import.meta.url));
   let data: unknown;
   try {
     data = JSON.parse(readFileSync(path, 'utf8'));
@@ -175,10 +187,26 @@ class Pool {
   }
 }
 
-function jobsFor(power: number, seed: number, balls: number, gatesOpen: boolean): Job[] {
+/** What every job of a run shares but its power. */
+interface RunOptions {
+  readonly seed: number;
+  readonly balls: number;
+  readonly gatesOpen: boolean;
+  readonly tulips: TulipMode;
+}
+
+function jobsFor(power: number, run: RunOptions): Job[] {
+  const { seed, balls, gatesOpen, tulips } = run;
   const jobs: Job[] = [];
   for (let first = 0; first < balls; first += BATCH_BALLS) {
-    jobs.push({ power, seed, gatesOpen, first, count: Math.min(BATCH_BALLS, balls - first) });
+    jobs.push({
+      power,
+      seed,
+      gatesOpen,
+      tulips,
+      first,
+      count: Math.min(BATCH_BALLS, balls - first),
+    });
   }
   return jobs;
 }
@@ -201,16 +229,31 @@ function row(power: number, tally: Tally): Row {
 }
 
 const pct = (r: number) => `${(100 * r).toFixed(2)}%`;
+const pctOrDash = (r: number | null) => (r === null ? '—' : pct(r));
 
-function printRun(name: string, seed: number, gatesOpen: boolean, r: Row): void {
+/** What the run held fixed, for its heading: ", attacker open, tulips held closed". */
+function heldText(run: RunOptions): string {
+  const attacker = run.gatesOpen ? ', attacker open' : '';
+  const tulips = run.tulips === 'play' ? '' : `, tulips held ${run.tulips}`;
+  return attacker + tulips;
+}
+
+function printRun(name: string, run: RunOptions, r: Row): void {
   const n = r.launched;
-  const gates = gatesOpen ? ', gates open' : '';
-  console.log(`board ${name}, power ${r.power}, ${n} balls, seed ${seed}${gates}`);
+  console.log(`board ${name}, power ${r.power}, ${n} balls, seed ${run.seed}${heldText(run)}`);
   console.log(`  start pocket     ${pct(r.startRate).padStart(7)}  (${r.entries.start})`);
   console.log(`  out-hole         ${pct(r.outRate).padStart(7)}  (${r.entries.out})`);
   console.log(`  foul             ${pct(r.foulRate).padStart(7)}  (${r.entries.foul})`);
-  if (gatesOpen) {
+  if (run.gatesOpen) {
     console.log(`  attacker         ${pct(r.attackerRate).padStart(7)}  (${r.entries.attacker})`);
+  }
+  for (const t of r.tulips) {
+    const entries = t.openEntries + t.closedEntries;
+    console.log(`  ${t.id.padEnd(16)} ${pct(t.entryRate).padStart(7)}  (${entries})`);
+    console.log(
+      `    while open     ${pctOrDash(t.openRate).padStart(7)}  (${t.openEntries}, open ${pct(t.openShare)} of the time)`,
+    );
+    console.log(`    while closed   ${pctOrDash(t.closedRate).padStart(7)}  (${t.closedEntries})`);
   }
   if (r.lost > 0) console.log(`  left the board            (${r.lost})`);
   if (r.stuck > 0) console.log(`  stuck in play             (${r.stuck})`);
@@ -219,24 +262,20 @@ function printRun(name: string, seed: number, gatesOpen: boolean, r: Row): void 
   );
 }
 
-function printSweep(
-  name: string,
-  seed: number,
-  balls: number,
-  gatesOpen: boolean,
-  rows: readonly Row[],
-  best: Row,
-) {
-  const gates = gatesOpen ? ', gates open' : '';
-  console.log(`board ${name}, ${balls} balls per power, seed ${seed}${gates}`);
+function printSweep(name: string, run: RunOptions, rows: readonly Row[], best: Row) {
+  const { gatesOpen } = run;
+  console.log(`board ${name}, ${run.balls} balls per power, seed ${run.seed}${heldText(run)}`);
   const attackerHead = gatesOpen ? ' attacker' : '';
-  console.log(`  power   start     out    foul${attackerHead}  stuck  spins/¥1000`);
+  const tulips = rows.some((r) => r.tulips.length > 0);
+  const tulipHead = tulips ? '   tulip' : '';
+  console.log(`  power   start     out    foul${attackerHead}${tulipHead}  stuck  spins/¥1000`);
   for (const r of rows) {
     const mark = r === best ? '  ← best' : '';
     const attacker = gatesOpen ? ` ${pct(r.attackerRate).padStart(8)}` : '';
+    const tulip = tulips ? ` ${pct(r.tulipRate).padStart(7)}` : '';
     console.log(
       `  ${r.power.toFixed(3)} ${pct(r.startRate).padStart(7)} ${pct(r.outRate).padStart(7)} ` +
-        `${pct(r.foulRate).padStart(7)}${attacker} ${String(r.stuck).padStart(6)}  ` +
+        `${pct(r.foulRate).padStart(7)}${attacker}${tulip} ${String(r.stuck).padStart(6)}  ` +
         `${r.spinsPer1000Yen.toFixed(2).padStart(6)} ± ${r.spinsPer1000YenSe.toFixed(2)}${mark}`,
     );
   }
@@ -254,6 +293,7 @@ async function main(): Promise<void> {
         seed: { type: 'string', default: '1' },
         workers: { type: 'string' },
         open: { type: 'boolean', default: false },
+        tulips: { type: 'string', default: 'play' },
         json: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
@@ -274,6 +314,11 @@ async function main(): Promise<void> {
     values.workers === undefined
       ? Math.min(8, availableParallelism())
       : parseIntArg('workers', values.workers, 1, 64);
+  const tulips = values.tulips as TulipMode;
+  if (!TULIP_MODES.includes(tulips)) {
+    fail(`--tulips must be one of ${TULIP_MODES.join(', ')}, got "${values.tulips}"`);
+  }
+  const run: RunOptions = { seed, balls, gatesOpen: values.open, tulips };
   const { board, data } = loadBoard(values.board);
 
   const started = performance.now();
@@ -283,8 +328,7 @@ async function main(): Promise<void> {
     // In-process: same code path the workers run, without threads.
     for (const power of powers) {
       const total = createTally();
-      for (const job of jobsFor(power, seed, balls, values.open))
-        addTally(total, runBatch(board, job));
+      for (const job of jobsFor(power, run)) addTally(total, runBatch(board, job));
       rows.push(row(power, total));
       ballSteps += total.ballSteps;
     }
@@ -292,7 +336,7 @@ async function main(): Promise<void> {
     const pool = new Pool(data, workers);
     try {
       for (const power of powers) {
-        const total = await pool.run(jobsFor(power, seed, balls, values.open));
+        const total = await pool.run(jobsFor(power, run));
         rows.push(row(power, total));
         ballSteps += total.ballSteps;
       }
@@ -311,20 +355,29 @@ async function main(): Promise<void> {
           board: board.name,
           seed,
           gatesOpen: values.open,
+          tulipMode: tulips,
           balls,
           rows,
           best: best.power,
         }),
       );
     } else {
-      printSweep(board.name, seed, balls, values.open, rows, best);
+      printSweep(board.name, run, rows, best);
     }
   } else {
     const r = rows[0] as Row;
     if (values.json) {
-      console.log(JSON.stringify({ board: board.name, seed, gatesOpen: values.open, ...r }));
+      console.log(
+        JSON.stringify({
+          board: board.name,
+          seed,
+          gatesOpen: values.open,
+          tulipMode: tulips,
+          ...r,
+        }),
+      );
     } else {
-      printRun(board.name, seed, values.open, r);
+      printRun(board.name, run, r);
     }
   }
   const rate = seconds > 0 ? ballSteps / seconds / 1e6 : 0;

@@ -48,8 +48,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # Best power on the classic board, from the sweep below (PHYSICS.md, "M3 tuning").
-      BEST_POWER: '0'
+      # Best power on the classic board, from the sweep below (PHYSICS.md
+      # tuning log: M3, then the handle remap in M5).
+      BEST_POWER: '0.2'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

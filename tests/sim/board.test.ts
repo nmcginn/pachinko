@@ -251,7 +251,7 @@ describe('parseBoard', () => {
       const world = createBoardWorld(board);
       // The bowl's 2 segments, then the lid's 2.
       expect(world.gates).toEqual([
-        { id: 'attacker', sensorId: 'attacker', segments: [2, 3], open: false },
+        { id: 'attacker', sensorId: 'attacker', segments: [2, 3], openSegments: [], open: false },
       ]);
       expect(world.segments).toHaveLength(4);
     });
@@ -312,10 +312,139 @@ describe('parseBoard', () => {
     });
   });
 
+  describe('tulips', () => {
+    // A cup at x 0.15 with its mouth at y 0.06: wings hinged on its rims.
+    const wings = {
+      closed: [
+        [
+          [0.14, 0.06],
+          [0.143, 0.072],
+        ],
+        [
+          [0.16, 0.06],
+          [0.157, 0.072],
+        ],
+      ],
+      open: [
+        [
+          [0.14, 0.06],
+          [0.13, 0.07],
+        ],
+        [
+          [0.16, 0.06],
+          [0.17, 0.07],
+        ],
+      ],
+    };
+    const tulip = (extra: Record<string, unknown>) => ({
+      id: 'tulip',
+      kind: 'tulip',
+      polygon: [
+        [0.141, 0.057],
+        [0.159, 0.057],
+        [0.159, 0.045],
+        [0.141, 0.045],
+      ],
+      ...extra,
+    });
+    const withPocket = (p: unknown) =>
+      edit((b) => (b['pockets'] = [...(b['pockets'] as unknown[]), p]));
+
+    it('accept wings, and the board world makes them a closed gate with both shapes', () => {
+      const board = parseBoard(withPocket(tulip({ wings })));
+      expect(board.pockets[1]).toMatchObject({
+        kind: 'tulip',
+        wings: {
+          closed: [
+            [{ x: 0.14, y: 0.06 }, {}],
+            [{}, {}],
+          ],
+          open: [
+            [{}, { x: 0.13 }],
+            [{}, {}],
+          ],
+        },
+      });
+      const world = createBoardWorld(board);
+      // The bowl's 2 segments, then the closed wings' 2, then the open wings' 2.
+      expect(world.gates).toEqual([
+        { id: 'tulip', sensorId: 'tulip', segments: [2, 3], openSegments: [4, 5], open: false },
+      ]);
+      expect([...world.segmentOff]).toEqual([0, 0, 0, 0, 1, 1]);
+      expect(pocketKind(board, 'tulip')).toBe('tulip');
+    });
+
+    it('need wings, and nothing else may have them', () => {
+      expect(issues(withPocket(tulip({})))).toEqual([
+        'pockets[1].wings: a tulip needs wings, { "closed": [polyline, …], "open": [polyline, …] }',
+      ]);
+      const out = (minimal()['pockets'] as unknown[])[0] as Record<string, unknown>;
+      expect(issues(edit((b) => (b['pockets'] = [{ ...out, wings }])))).toEqual([
+        'pockets[0].wings: only tulip pockets have wings, not "out"',
+        'pockets: needs at least one "out" pocket, or balls can never leave',
+      ]);
+      expect(issues(withPocket(tulip({ wings, lid: wings.closed[0] })))).toEqual([
+        'pockets[1].lid: only attacker pockets have a lid, not "tulip"',
+      ]);
+    });
+
+    it('reject wings without both shapes, or with an unusable polyline', () => {
+      expect(issues(withPocket(tulip({ wings: { closed: wings.closed } })))).toEqual([
+        'pockets[1].wings.open: must be an array',
+      ]);
+      expect(issues(withPocket(tulip({ wings: { ...wings, open: [] } })))).toEqual([
+        'pockets[1].wings.open: needs at least one wing polyline',
+      ]);
+      expect(issues(withPocket(tulip({ wings: { ...wings, ajar: [] } })))).toEqual([
+        'pockets[1].wings.ajar: unknown field',
+      ]);
+      expect(issues(withPocket(tulip({ wings: 'spread' })))).toEqual([
+        'pockets[1].wings: must be an object',
+      ]);
+      expect(
+        issues(
+          withPocket(tulip({ wings: { ...wings, closed: [wings.closed[0], [[0.16, 0.06]]] } })),
+        ),
+      ).toEqual(['pockets[1].wings.closed[1]: a wing needs at least 2 points, got 1']);
+      expect(
+        issues(
+          withPocket(
+            tulip({
+              wings: {
+                ...wings,
+                open: [
+                  [
+                    [0.14, 0.06],
+                    [0.25, 0.07],
+                  ],
+                ],
+              },
+            }),
+          ),
+        ),
+      ).toEqual(['pockets[1].wings.open[0][1]: (0.25, 0.07) is outside the 0.2 × 0.2 m board']);
+    });
+
+    it('reject a launcher on the open wings, though they are not there at the start', () => {
+      // 4 mm off the middle of the left open wing, 8 mm from the closed wings.
+      const launcher = { x: 0.132, y: 0.062, angleDeg: 90, minSpeedMps: 1 };
+      expect(
+        issues(
+          edit((b) => {
+            b['pockets'] = [...(b['pockets'] as unknown[]), tulip({ wings })];
+            b['launcher'] = launcher;
+          }),
+        ),
+      ).toEqual([
+        'launcher: a ball at (0.132, 0.062) would overlap a nail or rail with every gate open',
+      ]);
+    });
+  });
+
   it('rejects bad pockets', () => {
     const out = (minimal()['pockets'] as unknown[])[0] as Record<string, unknown>;
     expect(issues(edit((b) => (b['pockets'] = [{ ...out, kind: 'jackpot' }])))).toEqual([
-      'pockets[0].kind: must be one of start, out, foul, attacker, got jackpot',
+      'pockets[0].kind: must be one of start, out, foul, attacker, tulip, got jackpot',
       'pockets: needs at least one "out" pocket, or balls can never leave',
     ]);
     expect(

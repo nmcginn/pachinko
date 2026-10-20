@@ -10,11 +10,14 @@ export const STARTING_BALLS = 250;
 export const START_POCKET_PAYOUT = 3;
 /** Balls paid into the tray for each attacker entry, during a jackpot round or swept in as it closes. */
 export const ATTACKER_PAYOUT = 15;
+/** Balls paid into the tray for each tulip entry, open or closed: the start pocket's 3 (the maintainer's choice, M5). */
+export const TULIP_PAYOUT = 3;
 
 /** What a pocket pays into the tray. A foul's returned ball is not a payout. */
 const PAYOUT: Record<PocketKind, number> = {
   start: START_POCKET_PAYOUT,
   attacker: ATTACKER_PAYOUT,
+  tulip: TULIP_PAYOUT,
   out: 0,
   foul: 0,
 };
@@ -37,7 +40,7 @@ export function createEconomy(startingBalls = STARTING_BALLS): Economy {
   return {
     balls: startingBalls,
     launched: 0,
-    entries: { start: 0, out: 0, foul: 0, attacker: 0 },
+    entries: { start: 0, out: 0, foul: 0, attacker: 0, tulip: 0 },
     paidOut: 0,
   };
 }
@@ -52,8 +55,9 @@ export function takeBallForLaunch(economy: Economy): boolean {
 
 /**
  * Record a ball ending in a pocket. The start pocket pays
- * START_POCKET_PAYOUT into the tray and the attacker ATTACKER_PAYOUT (their
- * spins and rounds are game/machine.ts's). A foul ball never reached the
+ * START_POCKET_PAYOUT into the tray, the attacker ATTACKER_PAYOUT and a
+ * tulip TULIP_PAYOUT (spins and rounds are game/machine.ts's; a tulip's
+ * wings are game/tulip.ts's). A foul ball never reached the
  * field, so it goes back to the tray, as on real machines. The out-hole
  * pays nothing.
  */

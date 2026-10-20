@@ -14,9 +14,11 @@
 // other. Balls that could meet within the step are found with a spatial hash
 // and moved together, earliest event first, so a ball never passes through
 // or ends inside another. A ball nobody can reach moves exactly as above.
-// Gates (the attacker's lid) are rail segments that can be switched off:
-// an open gate's segments are skipped. Opening and closing is input, like a
-// launch; only setGateOpen does it, never the step.
+// Gates are rail segments switched by an open/closed state: the attacker's
+// lid is solid only while closed; a tulip's wings have one shape while
+// closed and another while open (M5). Segments of the other state are
+// skipped. Opening and closing is input, like a launch; only setGateOpen
+// does it, never the step.
 // Every constant here is derived or justified in PHYSICS.md.
 
 import {
@@ -34,6 +36,16 @@ import {
 } from './collide';
 import { type Candidates, type StaticGrid, createStaticGrid, queryGrid } from './broadphase';
 import { type SensorShape, sensorEntryT } from './sensor';
+
+// The functions the step's inner loops call, read once. Under tsx (the
+// Monte Carlo CLI, its worker threads, and the tests) each module's exports
+// are getters, so every call through an import pays one; in findStaticEvent
+// that was about 7% of a Monte Carlo run. They never change, so the copies
+// are the same functions.
+const queryGridFn = queryGrid;
+const sweepDiscFn = sweepDisc;
+const sweepCapsuleFn = sweepCapsule;
+const sensorEntryTFn = sensorEntryT;
 
 /** Sim timestep. PLAN.md: 1/2000 s or finer, so a ball at max launch speed moves less than its radius per step. */
 export const SIM_STEP_S = 1 / 2000;
@@ -103,12 +115,18 @@ export interface Bounds {
   readonly maxY: number;
 }
 
-/** A gate as passed to createWorld: a lid that closes over a pocket. */
+/**
+ * A gate as passed to createWorld: geometry over a pocket that changes with
+ * an open/closed state. The attacker's lid has only closed segments; a
+ * tulip's wings have both.
+ */
 export interface GateOptions {
   readonly id: string;
-  /** The lid. Solid while the gate is closed, absent while it is open. */
+  /** Solid while the gate is closed, absent while it is open: the attacker's lid, a tulip's closed wings. */
   readonly segments: readonly SegmentShape[];
-  /** Sensor that takes a ball caught in the gate's mouth when it closes. */
+  /** Solid while the gate is open, absent while it is closed: a tulip's open wings. Default none. */
+  readonly openSegments?: readonly SegmentShape[];
+  /** Sensor that takes a ball the gate's geometry switches on over (see setGateOpen). */
   readonly sensorId: string;
   /** Default false: closed. */
   readonly open?: boolean;
@@ -117,8 +135,10 @@ export interface GateOptions {
 export interface Gate {
   readonly id: string;
   readonly sensorId: string;
-  /** Indices of the lid's segments in world.segments. */
+  /** Indices in world.segments of the segments solid while closed. */
   readonly segments: readonly number[];
+  /** Indices in world.segments of the segments solid while open. */
+  readonly openSegments: readonly number[];
   /** Read it; change it only through setGateOpen. */
   readonly open: boolean;
 }
@@ -132,7 +152,7 @@ export interface WorldOptions {
   readonly sensors?: readonly SensorShape[];
   /** A ball whose centre leaves this box is removed. Unbounded if omitted. */
   readonly bounds?: Bounds;
-  /** Gates. Their lid segments are appended to `segments`, after the rails. */
+  /** Gates. Their segments are appended to `segments`, after the rails: each gate's closed ones, then its open ones. */
   readonly gates?: readonly GateOptions[];
   /**
    * Balls collide with each other (default false: they pass through each
@@ -157,9 +177,15 @@ export interface World {
   readonly circles: readonly CircleShape[];
   readonly segments: readonly SegmentShape[];
   readonly sensors: readonly SensorShape[];
+  /**
+   * Highest top of any sensor (-Infinity with none). A move that stays above
+   * it can't enter one, so the step skips testing them: on a board, balls
+   * spend most of their flight above every pocket.
+   */
+  readonly sensorsTopY: number;
   readonly bounds: Bounds | null;
   readonly gates: readonly Gate[];
-  /** Per segment, 1 if it belongs to an open gate and is skipped. Kept by setGateOpen. */
+  /** Per segment, 1 if it belongs to a gate in the other state and is skipped. Kept by setGateOpen. */
   readonly segmentOff: Uint8Array;
   /** Balls captured by sensors during the latest step, in ball order. Replaced every step. */
   captures: readonly Capture[];
@@ -189,18 +215,22 @@ export function createWorld(options: WorldOptions = {}): World {
     if (!sensors.some((s) => s.id === g.sensorId)) {
       throw new RangeError(`gate "${g.id}" names sensor "${g.sensorId}", which isn't in the world`);
     }
-    if (g.segments.length === 0) throw new RangeError(`gate "${g.id}" has no lid segments`);
-    const first = segments.length;
-    segments.push(...g.segments);
+    const openShape = g.openSegments ?? [];
+    if (g.segments.length + openShape.length === 0) {
+      throw new RangeError(`gate "${g.id}" has no segments`);
+    }
+    const append = (shapes: readonly SegmentShape[]): number[] =>
+      shapes.map((shape) => segments.push(shape) - 1);
     gates.push({
       id: g.id,
       sensorId: g.sensorId,
-      segments: g.segments.map((_, k) => first + k),
+      segments: append(g.segments),
+      openSegments: append(openShape),
       open: g.open ?? false,
     });
   }
   const segmentOff = new Uint8Array(segments.length);
-  for (const g of gates) if (g.open) for (const i of g.segments) segmentOff[i] = 1;
+  for (const g of gates) for (const i of g.open ? g.segments : g.openSegments) segmentOff[i] = 1;
   return {
     timeS: 0,
     steps: 0,
@@ -208,6 +238,7 @@ export function createWorld(options: WorldOptions = {}): World {
     circles,
     segments,
     sensors,
+    sensorsTopY: Math.max(-Infinity, ...sensors.map((s) => s.maxY)),
     bounds: bounds ?? null,
     gates,
     segmentOff,
@@ -259,26 +290,29 @@ export function removeBall(world: World, id: number): boolean {
 }
 
 /**
- * Open or close a gate. Opening just removes the lid. Closing puts it back,
- * and a ball the lid would close on (one already in the gate's mouth,
- * overlapping the lid) is taken by the gate's sensor, as if it had dropped
- * in: the lid can't close through it, and nothing ever pushes a ball out of
- * geometry. Returns those captures, in ball order; they are removed from
- * play but not added to `world.captures`, which belongs to the step.
+ * Open or close a gate: the segments of the old state go, those of the new
+ * one appear. A ball a new segment would land on (one overlapping it, such
+ * as a ball in the attacker's mouth as its lid closes) is taken by the
+ * gate's sensor, as if it had dropped in: geometry can't switch on through
+ * a ball, and nothing ever pushes a ball out of geometry. Returns those
+ * captures, in ball order; they are removed from play but not added to
+ * `world.captures`, which belongs to the step.
  */
 export function setGateOpen(world: World, id: string, open: boolean): readonly Capture[] {
   const gate = world.gates.find((g) => g.id === id);
   if (!gate) throw new RangeError(`no gate "${id}"`);
   if (gate.open === open) return NO_CAPTURES;
   (gate as { open: boolean }).open = open;
+  const on = open ? gate.openSegments : gate.segments;
   for (const i of gate.segments) world.segmentOff[i] = open ? 1 : 0;
-  if (open) return NO_CAPTURES;
+  for (const i of gate.openSegments) world.segmentOff[i] = open ? 0 : 1;
+  if (on.length === 0) return NO_CAPTURES;
   const caught: Capture[] = [];
   for (const ball of world.balls) {
-    const onLid = gate.segments.some(
+    const landsOn = on.some(
       (i) => segmentDistanceM(world.segments[i] as SegmentShape, ball.x, ball.y) < BALL_CLEARANCE_M,
     );
-    if (onLid) caught.push({ ball, sensorId: gate.sensorId });
+    if (landsOn) caught.push({ ball, sensorId: gate.sensorId });
   }
   for (const c of caught) removeBall(world, c.ball.id);
   return caught.length > 0 ? caught : NO_CAPTURES;
@@ -458,14 +492,14 @@ function findStaticEvent(
   best.t = Infinity;
 
   if (world.grid) {
-    queryGrid(world.grid, x, y, x + dx, y + dy, candidates);
+    queryGridFn(world.grid, x, y, x + dx, y + dy, candidates);
   } else {
     everyShape(world, candidates);
   }
   const { segmentOff } = world;
   for (const ci of candidates.circles) {
     const c = world.circles[ci] as CircleShape;
-    if (sweepDisc(x, y, dx, dy, c.x, c.y, BALL_RADIUS_M + c.radiusM, hit)) {
+    if (sweepDiscFn(x, y, dx, dy, c.x, c.y, BALL_RADIUS_M + c.radiusM, hit)) {
       if (hit.t < best.t) {
         best.t = hit.t;
         best.nx = hit.nx;
@@ -478,7 +512,7 @@ function findStaticEvent(
   for (const si of candidates.segments) {
     if (segmentOff[si]) continue;
     const s = world.segments[si] as SegmentShape;
-    if (sweepCapsule(x, y, dx, dy, s, BALL_RADIUS_M, hit)) {
+    if (sweepCapsuleFn(x, y, dx, dy, s, BALL_RADIUS_M, hit)) {
       if (hit.t < best.t) {
         best.t = hit.t;
         best.nx = hit.nx;
@@ -494,11 +528,14 @@ function findStaticEvent(
   // the move) takes the ball where its centre crossed in.
   let sensor: SensorShape | null = null;
   let sensorT = material ? best.t : 1;
-  for (const p of world.sensors) {
-    const t = sensorEntryT(p, x, y, dx, dy);
-    if (t <= sensorT && (!sensor || t < sensorT)) {
-      sensor = p;
-      sensorT = t;
+  // Above every sensor, sensorEntryT would return Infinity for each.
+  if (Math.min(y, y + dy) <= world.sensorsTopY) {
+    for (const p of world.sensors) {
+      const t = sensorEntryTFn(p, x, y, dx, dy);
+      if (t <= sensorT && (!sensor || t < sensorT)) {
+        sensor = p;
+        sensorT = t;
+      }
     }
   }
   out.sensor = sensor;

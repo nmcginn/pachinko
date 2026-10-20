@@ -13,6 +13,17 @@ export const DIAL_SWEEP_DEG = 270;
 export const POWER_STEP = 0.02;
 
 /**
+ * Power one arrow-key step up (+1) or down (−1) from `power`, on the grid of
+ * POWER_STEP: ten steps up from 0 are exactly 0.2, not 0.2 plus rounding
+ * error, so a power reached by keys gives the same shots as that power set
+ * in a test or the Monte Carlo. Clamped to [0, 1] by setPower.
+ */
+export function stepPower(power: number, direction: 1 | -1): number {
+  const stepsPerUnit = Math.round(1 / POWER_STEP);
+  return Math.round(power * stepsPerUnit + direction) / stepsPerUnit;
+}
+
+/**
  * Power for a dial angle in degrees, clockwise from straight up. The dead
  * zone at the bottom snaps to whichever end is nearer.
  */
@@ -64,10 +75,10 @@ export function bindKeyboard(target: Window, fire: FireControl, holds: Holds): (
       holds.set('key', true);
       e.preventDefault();
     } else if (INCREASE.has(e.key)) {
-      setPower(fire, fire.power + POWER_STEP);
+      setPower(fire, stepPower(fire.power, 1));
       e.preventDefault();
     } else if (DECREASE.has(e.key)) {
-      setPower(fire, fire.power - POWER_STEP);
+      setPower(fire, stepPower(fire.power, -1));
       e.preventDefault();
     }
   };

@@ -28,7 +28,7 @@ Board plane, metres. x to the right, y up; gravity pulls toward -y. `render/` fl
 | Ball–ball friction         | none                    | `resolveBallContact`   | Assumption, M5. See "Ball against ball".                                       |
 | Max friction loss          | 2/7 of tangential speed | `MAX_FRICTION_LOSS`    | Solid sphere spinning up to rolling. See "Friction".                           |
 | Max launch speed           | 5 m/s                   | `MAX_LAUNCH_SPEED_MPS` | Confirmed on `boards/classic.json` in M2. See "Max launch speed".              |
-| Min launch speed (classic) | 3.2 m/s                 | `boards/classic.json`  | Power 0. Fouls start below about 3.0 m/s. See "Launch speed range".            |
+| Min launch speed (classic) | 2.7 m/s                 | `boards/classic.json`  | Power 0, a foul (handle remap, M5). See "Launch speed range".                  |
 | Launch spread              | 1% (one s.d.)           | `LAUNCH_SPEED_SPREAD`  | Assumption, M3. Results insensitive from 0.2% to 2%. See "Launch spread".      |
 | Auto-fire interval         | 0.6 s (1200 steps)      | `FIRE_INTERVAL_STEPS`  | PLAN.md: 100 balls/min. Game timing, counted in sim steps.                     |
 | Broadphase cell            | 20 mm                   | `GRID_CELL_M`          | Numerical. Changes speed only, never results. See "Broadphase".                |
@@ -55,6 +55,8 @@ The handle maps power linearly from the board's `launcher.minSpeedMps` (power 0)
 
 On the classic board a shot needs about 3.0 m/s to get past the end of the inner rail; slower ones roll back down the lane into the foul pocket. Measured by sweeping the launch speed: 2.9 m/s fouls, 3.0 m/s reaches the field. Power 0 is set at 3.2 m/s, about 7% clear, so no handle setting fouls (tested: 5% below power 0 still clears). Real handles do have a weak range that fouls. A foul goes back to the tray (PLAN.md game rules), so a weak range would cost the player nothing; it was left out because it would only be dead travel on the handle.
 
+The handle remap (M5) changed this. The maintainer chose to map the handle as on real machines: a foul at the bottom, an overshoot at the top, and the sweet spot part-way up. Power 0 is now 2.7 m/s. Shots below about power 0.1 (2.93 m/s) always foul; at 0.1 about 4 in 10 do, with the launch spread; from 0.15 none do. The sweet spot is power 0.2 (3.16 m/s, about the old power 0's 3.2 m/s), and the top of the handle is unchanged at 5 m/s (`MAX_LAUNCH_SPEED_MPS`, which the tunnelling invariants fire at, so it stays). See the tuning log for how 2.7 was chosen and the numbers.
+
 Where shots land, at the M2 geometry: power 0 to about 0.1 peels off the outer rail near the top and drops into the top of the field, first touching a nail between x = 0.29 m (power 0, just right of the 0.25 m centre line) and 0.39 m (power 0.1). The ball holds to the curved rail while v²/R > g·sin φ, so the peel-off point moves right with speed. From about 0.15 up, the ball stays on the rail to the return bumper and drops into the field's right side. Nothing lands left of centre. That narrow band is how the speeds work out, not a choice; it is the first thing M3 will look at when tuning for 18–24 spins per ¥1000.
 
 ### Launch spread (M3)
@@ -75,7 +77,7 @@ A ball still in play 30 s after its launch is counted stuck and removed. No real
 
 How much it matters: at the auto-fire rate there are about 3 balls in flight at power 0 and 2 at power 0.62, and only 0.2% (power 0) to 0.3% (power 0.62) of balls ever touch another (3000 balls each, seed 1). So the rates barely move; see the tuning log.
 
-Speed: about 3.4 k sim steps per ball on the classic board at power 0 (1.7 s of flight). On the dev container a 1000-ball batch takes about 1.4 times as long on one thread as M3's one-at-a-time method (measured twice: 1.41 s against 1.00 s, and 2.10 s against 1.49 s on a busier machine); the shared world takes 1200 steps per ball whatever is in flight. On CI, M3's two 100k runs took 56 s together, about 1.45 times the dev container, so this method should take about 42 s per run there. 100k balls at power 0 take about 29 s on 4 workers (M3: 19 s), against CI's 60 s limit.
+Speed: about 3.4 k sim steps per ball on the classic board at power 0 (1.7 s of flight). On the dev container a 1000-ball batch takes about 1.4 times as long on one thread as M3's one-at-a-time method (measured twice: 1.41 s against 1.00 s, and 2.10 s against 1.49 s on a busier machine); the shared world takes 1200 steps per ball whatever is in flight. On CI, M3's two 100k runs took 56 s together, about 1.45 times the dev container, so this method should take about 42 s per run there. 100k balls at power 0 take about 29 s on 4 workers (M3: 19 s), against CI's 60 s limit. The two tulips (M5) added two sensors, which every piece of every ball's path was tested against, and took CI's 100k run from 54 s to 72 s, over the limit; the step now skips the sensors for a move that stays above the highest one (`sensorsTopY`), where none can be entered, so results are bit-identical and the classic board runs about 20% faster than before the fix (4.9 s against 6.2 s for 3000 balls on one thread). Under tsx every call through an import goes through a getter, which in the step's inner loop was about 7% of a run, so `world.ts` reads those functions once into local constants. Together: 3000 balls on one thread in 4.05 s against master's 4.86 s (best of five), 100k at power 0.2 in about 36 s on 4 workers locally, with output byte-identical to before both changes.
 
 ### Rails as polylines
 
@@ -135,6 +137,28 @@ Closing can't push a ball out of the way: nothing in the sim ever pushes a ball 
 
 The closed lid on the classic board is a shallow roof, 6 mm high over its 90 mm span (about 7.6°), not a flat plate: a flat lid is a ledge a ball can come to rest on for ever (the sim rests a ball exactly on a flat surface; see "Friction"), and every ball stranded there would count as stuck. On the roof, gravity along the slope is about 1.3 m/s², so a ball always rolls off. A ball dropped exactly on the apex with no sideways speed would balance there, the same knife-edge as the nail crest under the start cup (M3 tuning); the Monte Carlo found none in 410 000 balls with the lid shut (the 21-power sweep and the two 100k runs in the tuning log), and CI fails on any stuck ball.
 
+### Gates: tulips (M5)
+
+A tulip (チューリップ) is a pocket with wings. Its wings are a gate too, with two shapes: one polyline set solid while it is closed and another solid while it is open, each skipped in the other state. The game opens a closed tulip on an entry and closes an open one on the next (PLAN.md game rules), on the step the ball is taken, by `setGateOpen` as for the attacker.
+
+Switching a shape on can land on a ball, which the attacker's lid only did when closing. The same rule covers both: a ball a newly solid segment overlaps is taken by the pocket, never pushed out (nothing in the sim pushes a ball out of geometry). For a tulip that means a ball beside the hinge as the wings swing open, or between the closed wing tips as they swing shut, both a ball the moving wing would have scooped or knocked in. A taken ball is an entry like any other, so it toggles the tulip again (and could, in principle, sweep in another; each pass removes a ball, so it ends). Switching never adds energy: geometry appears or disappears, no ball moves, and a taken ball leaves (invariant tests: 30 balls round a tulip switched every 20 ms, energy never rises, no ball is ever left inside a wing, a nail, a rail or another ball, same seed same run).
+
+The launch point must be clear of every gate in both states (`parseBoard`), since opening a tulip adds geometry.
+
+The classic board has two (M5; see the tuning log), as real boards do: one either side of the field, about level with the start pocket, mirror images about the centre line. Each sits at x = 0.15 m or 0.35 m, its mouth (the top of its cup, where the wings are hinged) at y = 0.17 m, 2 mm above the start cup's rim. Its cup is the start cup's, 17 mm inside and 18 mm deep, with a sensor inside below the rim. Closed, the wing tips lean in to a 12.5 mm gap (the ヘソ nails' gap) 12 mm above the hinges; open, they splay out to tips 38 mm apart, 10.5 mm up (about 45°). Six nails round each were taken out to make room. Each pays 3 balls (`TULIP_PAYOUT`, the maintainer's choice).
+
+Measured with `tools/montecarlo.ts --board classic --balls 20000 --power 0.2 --seed 1`, each tulip:
+
+| `--tulips`      | Left: entries | Left: open / closed | Right: entries | Right: open / closed | Open, share of time (L / R) | Spins per ¥1000 |
+| --------------- | ------------- | ------------------- | -------------- | -------------------- | --------------------------- | --------------- |
+| `play`          | 2.45% (490)   | 9.94% / 1.40%       | 2.47% (494)    | 11.10% / 1.39%       | 12.3% / 11.1%               | 22.59 ± 0.51    |
+| `open` (held)   | 10.56% (2112) | 10.56% / —          | 10.57% (2114)  | 10.57% / —           | 100%                        | 22.59 ± 0.51    |
+| `closed` (held) | 1.42% (283)   | — / 1.42%           | 1.39% (277)    | — / 1.39%            | 0%                          | 22.59 ± 0.51    |
+
+Open, a tulip takes about 7.5 times as many balls as closed. The tulips sit beside the start pocket's approach, not on it, so its entries are identical in all three runs. In play each is open about an eighth of the time, and both together take about 4.9% of balls, paying back about 0.15 balls per ball launched (the start pocket: about 0.27). The power sweep in the tuning log left no ball stuck at any power.
+
+How the Monte Carlo measures "while open" in play: each entry is filed under the tulip's state at that moment, and each step's counted balls in play add to that state's ball-time. The rate in a state is entries per ball-step in that state, times the mean ball-steps per launched ball: the share of launched balls it would take if it stayed in that state. It is a hazard-rate estimate, and it can read low for a state whose spells are short against a flight: just after the tulip opens, many balls in play are already below it or not yet near it, so an open spell's first second or two takes few entries. (On a one-tulip test board at the old best power it read 7.6% against 9.0% held open; on the classic board at power 0.2, 9.9–11.1% against 10.6%.) Holding the tulip open or closed for a whole run (`--tulips open|closed`) measures each shape without that, and is the cleaner comparison of the shapes; the in-play figures are what a player sees.
+
 ### Energy and the resting threshold
 
 The step is semi-implicit Euler: v' = v − g·dt, then y' = y + v'·dt. In free flight this loses exactly ½g²dt² per unit mass each step, so with drag on top, energy strictly decreases (checked by test).
@@ -181,6 +205,8 @@ The ball rolls on the backboard under the normal component of gravity, g·sin 3�
 - A launched ball appears at the bottom of the lane already at launch speed. The hammer stroke isn't modelled.
 - Ball–ball contacts are frictionless, and balls have no spin (see "Ball against ball").
 - Launch speed varies by 1% from shot to shot; launch direction does not vary (see "Launch spread").
+- Where real handles foul is a range, not one speed; here a shot fouls if it is too slow to get past the end of the inner rail (about 2.93 m/s on the classic board), and the 1% launch spread blurs the edge.
+- A tulip's wings switch shape instantly, in one step; their swing isn't modelled, so a ball can't be batted by a moving wing (see "Gates: tulips").
 
 ## Tuning log
 
@@ -261,3 +287,45 @@ New, not changed: `BALL_RESTITUTION` = 0.9 and frictionless ball–ball contact 
 | 100k at power 0, 4 workers, wall time      | 19 s                       | 29 s                       |
 
 Every change is within one standard error, as expected with 0.2–0.3% of balls ever touching another. The first version of the contact jammed balls on the out-hole floor (310 stuck at power 0.62, 232 at power 0); see "Ball against ball" for the fix. The numbers above are after it.
+
+### 2026-10-20: two tulips and the handle remap (M5)
+
+Two deliberate changes, both decided by the maintainer: tulips on the classic board (pay 3, two placed as real boards place them, the shape measured on a test board) and the handle remap, done first so the tulips are tuned at the power players will use. No physics constant changed; `MAX_LAUNCH_SPEED_MPS` stays 5 m/s.
+
+Board geometry changed in `boards/classic.json`:
+
+| Change                                  | Before  | After                                                                                                                      |
+| --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `launcher.minSpeedMps` (power 0)        | 3.2 m/s | 2.7 m/s                                                                                                                    |
+| Tulips `tulip-left`, `tulip-right`      | none    | Cups (rails `tulip-left-cup`, `tulip-right-cup`) at x = 0.15 and 0.35 m, mouths at y = 0.17 m, wings as in "Gates: tulips" |
+| Nails removed round the left tulip (6)  | present | (0.138, 0.179), (0.166, 0.179), (0.124, 0.16), (0.152, 0.16), (0.138, 0.141), (0.166, 0.141)                               |
+| Nails removed round the right tulip (6) | present | (0.362, 0.179), (0.334, 0.179), (0.376, 0.16), (0.348, 0.16), (0.362, 0.141), (0.334, 0.141), the mirror images            |
+
+Choosing 2.7 m/s. Start rate against launch speed, with the tulips in, at power 0 on copies of the board with `minSpeedMps` set to each speed (3000 balls each, seed 1, ±1.2 spins):
+
+| Speed (m/s)     | 2.90 | 2.95 | 3.00 | 3.05  | 3.10  | 3.15  | 3.20  | 3.25  | 3.30  | 3.40 |
+| --------------- | ---- | ---- | ---- | ----- | ----- | ----- | ----- | ----- | ----- | ---- |
+| Spins per ¥1000 | 3.83 | 13.0 | 19.1 | 20.42 | 20.92 | 22.33 | 19.92 | 19.75 | 18.17 | 6.50 |
+| Fouls           | 79%  | 21%  | 0.4% | 0     | 0     | 0     | 0     | 0     | 0     | 0    |
+
+The sweet spot is a plateau from about 3.05 to 3.30 m/s. Power 0.2 sits on both the arrow keys' 0.02 grid and the CI sweep's 0.05 grid, so 2.7 m/s puts power 0.2 at 3.16 m/s, mid-plateau. The arrow keys now step exactly on that grid (`stepPower` in `src/input/launcher.ts`), so a power set by keys gives the same shots as the same power in a test.
+
+Monte Carlo, `--board classic --seed 1`:
+
+| Run                                        | Before (master)        | Tulips only (old handle) | After (tulips and remap) |
+| ------------------------------------------ | ---------------------- | ------------------------ | ------------------------ |
+| `--balls 100000` at the best power         | 21.21 ± 0.22 (power 0) | 21.21 ± 0.22 (power 0)   | 22.29 ± 0.23 (power 0.2) |
+| start entries in that run                  | 8486                   | 8486                     | 8914                     |
+| tulip entries in that run, left / right    | —                      | 2.09% / 2.81%            | 2.56% / 2.44%            |
+| `--balls 100000 --power 0.62`              | 2.35 ± 0.08            | —                        | 3.94 ± 0.10              |
+| `--balls 10000 --open` at the best power   | 28.77% attacker (100k) | —                        | 27.75% attacker          |
+| stuck, `--sweep 0:1:0.05` at 10k per power | 0                      | —                        | 0                        |
+| best power in that sweep                   | 0                      | —                        | 0.2 (22.38)              |
+
+Adding the tulips moved no start-pocket entry at all (8486 either way): they sit beside its approach. The remap moved the best power up the handle and, by landing mid-plateau rather than at its 3.2 m/s edge, raised spins a little, still inside the 18–24 target. Power 0.62 is now a different speed (4.13 m/s rather than 4.32), hence its change. The sweep, power by power (spins per ¥1000; foul and tulip shares of balls):
+
+| Power  | 0    | 0.05 | 0.10  | 0.15  | 0.20  | 0.25  | 0.30 | 0.40 | 0.50 | 0.60 | 0.80 | 1.00 |
+| ------ | ---- | ---- | ----- | ----- | ----- | ----- | ---- | ---- | ---- | ---- | ---- | ---- |
+| Spins  | 0    | 0    | 7.83  | 20.42 | 22.38 | 19.22 | 8.00 | 5.77 | 4.15 | 3.95 | 2.93 | 0.78 |
+| Fouls  | 100% | 100% | 43.0% | 0     | 0     | 0     | 0    | 0    | 0    | 0    | 0    | 0    |
+| Tulips | 0    | 0    | 2.66% | 4.21% | 5.23% | 4.56% | 4.8% | 4.2% | 3.7% | 3.9% | 4.3% | 2.1% |

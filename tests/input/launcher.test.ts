@@ -3,6 +3,7 @@ import { createFireControl } from '../../src/game/fire';
 import {
   DIAL_SWEEP_DEG,
   POWER_STEP,
+  stepPower,
   bindKeyboard,
   createHolds,
   dialAngleToPower,
@@ -101,6 +102,24 @@ describe('keyboard', () => {
     expect(fire.power).toBeCloseTo(0.5 - POWER_STEP, 12);
     for (let i = 0; i < 100; i++) send('keydown', { code: 'ArrowRight', key: 'ArrowRight' });
     expect(fire.power).toBe(1);
+  });
+
+  it('keeps key steps on the POWER_STEP grid, exactly', () => {
+    const { fire, send } = setup();
+    for (let i = 0; i < 60; i++) send('keydown', { code: 'ArrowDown', key: 'ArrowDown' });
+    expect(fire.power).toBe(0);
+    for (let i = 0; i < 10; i++) send('keydown', { code: 'ArrowUp', key: 'ArrowUp' });
+    // Adding 0.02 ten times would give 0.20000000000000004.
+    expect(fire.power).toBe(0.2);
+    for (let i = 0; i < 31; i++) send('keydown', { code: 'ArrowUp', key: 'ArrowUp' });
+    expect(fire.power).toBe(0.82);
+  });
+
+  it('snaps an off-grid power (from the dial) onto the grid at the next key step', () => {
+    expect(stepPower(0.437, 1)).toBe(0.46);
+    expect(stepPower(0.437, -1)).toBe(0.42);
+    expect(stepPower(0, -1)).toBe(-0.02); // setPower clamps it to 0.
+    expect(stepPower(1, 1)).toBe(1.02);
   });
 
   it('ignores other keys, and everything after unbinding', () => {
