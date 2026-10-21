@@ -196,6 +196,12 @@ The friction coefficients are effective values for an impact, not handbook slidi
 
 The ball rolls on the backboard under the normal component of gravity, g·sin 3° ≈ 0.51 m/s². PLAN.md models this as a small velocity-proportional drag, dv/dt = −k·v, integrated implicitly (v ← v / (1 + k·dt)) so it can never overshoot. k = 0.1 /s takes 1% off a ball's speed in 0.1 s, the time a ball spends crossing a nail field: noticeable over a long roll, negligible within one bounce. It is a tuning knob for M3.
 
+### Impact speed for sound (M6)
+
+The rattle (`src/audio/cues.ts`) needs to know how hard balls hit things, so each step records its fastest impact in `world.impactSpeedMps`: the speed of approach along the contact normal, a ball into a nail or rail or two balls into each other, taken just before the impulse. It is only read, never fed back, so it changes no result: the Monte Carlo output is byte-identical to master's (100k balls, seed 1, at power 0.62 and 0.2), and timing is unchanged within noise (3000 balls on one thread, best of five: 5.4 s against master's 5.5 s).
+
+Measured on the classic board at power 0.2, 60 s of auto-fire, steps with an impact: about 210 a second under 0.05 m/s (resting and rolling contacts, held against a rail or nail by gravity), 37 a second over 0.2 m/s, none over 2 m/s. So a rattle needs at least 0.2 m/s (`RATTLE_MIN_SPEED_MPS`), which keeps a ball rolling down a rail quiet, and sounds at most every 25 ms (`RATTLE_INTERVAL_S`), so 30 balls rattle at 40 a second rather than hundreds. Both are presentation knobs, not physics.
+
 ## Assumptions
 
 - The frame loop discards wall time beyond 0.1 s per frame instead of catching up. Sim time is therefore not wall time after a stall. Nothing depends on wall time: the reel's spin, the jackpot rounds' 30 s timeout, and the pause between rounds (M4) all count sim steps (`src/game/machine.ts`), so a stall pauses them along with the balls.

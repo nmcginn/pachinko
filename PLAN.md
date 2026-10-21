@@ -10,10 +10,10 @@ Stack: Vite + TypeScript (strict), Canvas 2D, Vitest for unit tests, Playwright 
 
 Agents: update this section at the end of every session.
 
-- Current milestone: M5, tulips and ball–ball, complete on this branch once CI is green on its PR; then advance to M6, game feel. M4 landed on master as 67ecc54; M5's ball–ball collisions as 4b7a5ac.
-- Done in this milestone: both acceptance criteria. Ball–ball collisions (PHYSICS.md "Ball against ball"). Tulips (2026-10-20): gates with an open shape as well as a closed one, the `tulip` pocket kind with `wings`, `game/tulip.ts` (an entry opens a closed tulip, the next closes it; a ball the moving wings land on is taken in and counts as an entry), `TULIP_PAYOUT` = 3, the Monte Carlo's per-tulip rates while open and while closed (`--tulips play|open|closed`), and two tulips on `boards/classic.json`, either side of the start pocket. Each takes 10.6% of balls held open and 1.4% held closed at the best power (PHYSICS.md "Gates: tulips"); invariant tests switch the wings among 30 balls. The handle remap came first: `launcher.minSpeedMps` 3.2 → 2.7 m/s, so the bottom of the handle fouls, the best power is 0.2 (22.29 ± 0.23 spins per ¥1000, 100k balls), and the top overshoots; arrow keys step exactly on the 0.02 grid (PHYSICS.md tuning log, 2026-10-20).
-- Next up: M6, game feel, starting with its first criterion. Things to know: (1) the classic board's best power is 0.2, in CI's `BEST_POWER` and in the tests' `BEST_POWER` constants; power 0 now always fouls. (2) A tulip's open state lives in the world's gate (`tulipOpen`); the renderer draws whichever wing shape is solid, so M6's visuals can hang off `gate.open`. (3) Seed-dependent tests: e2e uses seeds 54 (a lone start entry) and 187 (two quick start entries); `tests/game/table.test.ts` seed 3. Physics changes can move their entries, so search for a new seed with a headless table rather than loosen a test.
-- Last session: 2026-10-20: M5 finished on PR #8 at the maintainer's direction: handle remap (power 0.2 is best, the bottom fouls), two tulips on the classic board paying 3, tests and e2e seeds moved to the new best power.
+- Current milestone: M6, game feel. M5 landed on master as d1c11d5 (tulips) and 4b7a5ac (ball–ball), CI green, so M5 is done.
+- Done in this milestone: the WebAudio bullet and the "no audio until first user interaction" half of the acceptance (2026-10-21, on its PR). `world.impactSpeedMps` records each step's hardest impact (read-only; Monte Carlo byte-identical, PHYSICS.md "Impact speed for sound"). `audio/cues.ts` turns table steps into cues (pure, Node-tested): rattle (≥ 0.2 m/s, at most one per 25 ms), a chime per start, tulip and attacker entry, reel ticks in step with the LCD's symbols, a stop per reel, and the jackpot fanfare. `audio/sound.ts` synthesises them (no sample files) and makes no AudioContext until the first pointer, touch or key press (`bindUnlock`). Mute: the bottom-left button or M, remembered in localStorage (`input/mute.ts`). e2e `tests/e2e/sound.spec.ts` wraps the page's AudioContext to check all of it.
+- Next up: M6's visual bullet (specular highlight on balls, nail glints, screen flash and reel celebration on jackpot), then haptics, then the frame-time half of the acceptance (under 8 ms with 30 balls), measured once the visuals are in. Things to know: (1) the classic board's best power is 0.2, in CI's `BEST_POWER` and the tests' `BEST_POWER` constants; power 0 always fouls. (2) A tulip's open state is its gate's `open`; the renderer draws whichever wing shape is solid. (3) Seed-dependent tests: e2e seeds 54 (a lone start entry) and 187 (two quick start entries); `tests/game/table.test.ts` seed 3; `tests/audio/cues.test.ts` seeds 54, 3, 7, 187, 11. Physics changes can move their entries, so search for a new seed with a headless table rather than loosen a test. (4) Haptics can hang off the same cues (`drainCues` in `main.ts`'s render), e.g. a buzz on the fanfare and on chimes. (5) The sound levels and timbres were set without listening (no speakers in the cloud session); they want an ear.
+- Last session: 2026-10-21: M6 started: synthesised WebAudio (rattle, chimes, reel, fanfare) driven by pure cues from the table, locked until the first interaction, with a remembered mute toggle.
 - Open questions for the maintainer: none.
 - Resolved: **Tulips: what does an entry pay, and where do they go on the classic board?** (2026-10-20) The maintainer took the recommendation: pay 3 (`TULIP_PAYOUT`); two tulips, one either side of the field, level with the start pocket, in the test board's shape; and the handle remap first. Done in PR #8; numbers in PHYSICS.md's tuning log.
 - Resolved: **When does a tulip close?** (2026-10-19) The maintainer chose the classic tulip: an entry into a closed tulip opens it, and the next entry closes it. No timer for now; one can be added later if it doesn't feel right. Now in "Game rules (v1)" and the M5 milestone.
@@ -57,13 +57,14 @@ Agents: update this section at the end of every session.
 │   │   ├── balls.ts
 │   │   ├── reel.ts
 │   │   └── hud.ts
-│   ├── input/              # Launch handle (mouse, touch, keyboard)
-│   └── audio/              # WebAudio, added in M6
+│   ├── input/              # Launch handle (mouse, touch, keyboard), debug keys, mute toggle
+│   └── audio/              # M6: cues.ts (pure: table steps → sound cues), sound.ts (WebAudio synthesis, unlock on first interaction)
 ├── tools/
 │   └── montecarlo.ts       # CLI over game/montecarlo.ts: worker threads, sweep, print stats
 └── tests/
     ├── sim/                # Vitest
     ├── game/               # Vitest
+    ├── audio/              # Vitest: cues, and the player against a fake AudioContext
     ├── fixtures/           # Test helpers (tulips.ts: where a board's tulips are)
     └── e2e/                # Playwright smoke tests
 ```
