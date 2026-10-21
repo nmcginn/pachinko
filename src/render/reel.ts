@@ -17,7 +17,7 @@ export const REEL_BAND_PX = 84;
 /** Fraction of the spin at which each reel stops: left, then right, then centre, as on real machines. */
 export const REEL_STOP_AT: readonly [number, number, number] = [0.5, 1, 0.75];
 /** Sim steps per symbol while a reel spins: 25 symbols a second. */
-const STEPS_PER_SYMBOL = 80;
+export const STEPS_PER_SYMBOL = 80;
 
 export interface ReelView {
   readonly digits: Digits;

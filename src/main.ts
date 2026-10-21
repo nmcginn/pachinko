@@ -6,9 +6,12 @@ import '@fontsource/jost/500.css';
 import './style.css';
 
 import classicBoard from '../boards/classic.json';
+import { collectCues, createCueTracker, drainCues } from './audio/cues';
+import { bindUnlock, createSound } from './audio/sound';
 import { createTable, stepTable } from './game/table';
 import { bindDebugKeys } from './input/debug';
 import { bindDial, bindKeyboard, createHolds } from './input/launcher';
+import { bindMute, loadMuted } from './input/mute';
 import { bindVisibility, createClock, createLoop } from './loop';
 import { drawBalls } from './render/balls';
 import { drawBoard } from './render/board';
@@ -65,6 +68,16 @@ bindKeyboard(window, table.fire, holds);
 bindDial(byId('handle', HTMLElement), table.fire, holds);
 bindDebugKeys(window, table.machine);
 
+// Sound starts on the first interaction, never before (bindUnlock).
+const storage = (): Storage => localStorage;
+const sound = createSound(
+  { createContext: () => new AudioContext() },
+  { muted: loadMuted(storage) },
+);
+bindUnlock(window, sound);
+bindMute(window, byId('mute', HTMLButtonElement), sound, storage);
+const cues = createCueTracker(table);
+
 const loop = createLoop(
   {
     requestFrame: (cb) => requestAnimationFrame(cb),
@@ -72,8 +85,12 @@ const loop = createLoop(
   },
   createClock(SIM_STEP_S, MAX_FRAME_S),
   {
-    step: () => stepTable(table),
+    step: () => {
+      stepTable(table);
+      collectCues(cues, table);
+    },
     render: (frame) => {
+      sound.play(drainCues(cues));
       const bv = drawBoard(view, table.board, table.world.gates, REEL_BAND_PX);
       drawBalls(view, bv, table.world.balls, frame.alpha);
       hud.update(table.economy, table.fire, table.world.balls.length);

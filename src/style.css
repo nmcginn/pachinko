@@ -125,6 +125,28 @@ body {
   text-shadow: 0 0 8px rgb(255 200 90 / 0.8);
 }
 
+/* Sound toggle: bottom left, away from the handle. aria-pressed is muted. */
+#mute {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  min-height: 44px;
+  padding: 0 14px;
+  font: inherit;
+  font-weight: 500;
+  font-size: 15px;
+  color: inherit;
+  background: rgb(0 0 0 / 0.55);
+  border: 2px solid #c9a227;
+  border-radius: 22px;
+  cursor: pointer;
+}
+
+#mute[aria-pressed='true'] {
+  border-color: #5b5f66;
+  color: #9a978f;
+}
+
 /* Launch handle: bottom right, under the right thumb on a phone. */
 #handle {
   position: fixed;
