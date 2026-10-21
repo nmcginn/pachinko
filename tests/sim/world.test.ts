@@ -248,3 +248,79 @@ describe('contact behaviour', () => {
     expect(Math.abs(ball.vx)).toBeCloseTo(MAX_LAUNCH_SPEED_MPS * NAIL_MATERIAL.restitution, 1);
   });
 });
+
+describe('impact speed (M6 rattle)', () => {
+  /** Step until the first impact and return its speed. */
+  function firstImpact(world: ReturnType<typeof createWorld>, maxSteps = 4000): number {
+    for (let i = 0; i < maxSteps; i++) {
+      stepWorld(world);
+      if (world.impactSpeedMps > 0) return world.impactSpeedMps;
+    }
+    throw new Error('no impact');
+  }
+
+  it('is 0 in an empty world and in free flight', () => {
+    const world = createWorld();
+    expect(world.impactSpeedMps).toBe(0);
+    stepWorld(world);
+    expect(world.impactSpeedMps).toBe(0);
+    addBall(world, { x: 0, y: 0, vx: 1, vy: 1 });
+    for (let i = 0; i < 100; i++) {
+      stepWorld(world);
+      expect(world.impactSpeedMps).toBe(0);
+    }
+  });
+
+  it('reports a head-on strike on a nail at the speed the ball hits it, then resets', () => {
+    const world = createWorld({
+      circles: [createCircle({ x: 0, y: 0 }, NAIL_RADIUS_M, NAIL_MATERIAL)],
+    });
+    const dropM = 0.05;
+    const startY = BALL_RADIUS_M + NAIL_RADIUS_M + dropM;
+    addBall(world, { x: 0, y: startY, vy: -1 });
+    // Falling dropM from 1 m/s, less a sliver of backboard drag.
+    const expected = Math.sqrt(1 + 2 * IN_PLANE_GRAVITY_MPS2 * dropM);
+    expect(firstImpact(world)).toBeCloseTo(expected, 2);
+    stepWorld(world);
+    expect(world.impactSpeedMps).toBe(0);
+  });
+
+  it('counts only the normal component of a glancing strike on a rail', () => {
+    const world = createWorld({
+      segments: createPolyline(
+        [
+          { x: -1, y: 0 },
+          { x: 1, y: 0 },
+        ],
+        RAIL_MATERIAL,
+      ),
+    });
+    addBall(world, { x: 0, y: BALL_RADIUS_M + 0.0005, vx: 3, vy: -0.4 });
+    const speed = firstImpact(world, 10);
+    // 0.4 m/s down plus 0.5 mm of fall; nothing like the ball's 3 m/s along the rail.
+    expect(speed).toBeCloseTo(Math.sqrt(0.4 ** 2 + 2 * IN_PLANE_GRAVITY_MPS2 * 0.0005), 2);
+    expect(speed).toBeLessThan(0.5);
+  });
+
+  it('reports two balls meeting head-on at their closing speed, with collisions on', () => {
+    const world = createWorld({ ballCollisions: true });
+    addBall(world, { x: -0.02, y: 0, vx: 1 });
+    addBall(world, { x: 0.02, y: 0, vx: -1 });
+    // Gravity acts on both alike, so the closing speed stays 2 m/s, less 0.15% of drag.
+    expect(firstImpact(world)).toBeCloseTo(2, 2);
+  });
+
+  it('is the fastest of a step’s impacts', () => {
+    const world = createWorld({
+      circles: [
+        createCircle({ x: 0, y: 0 }, NAIL_RADIUS_M, NAIL_MATERIAL),
+        createCircle({ x: 0.1, y: 0 }, NAIL_RADIUS_M, NAIL_MATERIAL),
+      ],
+    });
+    const contactY = BALL_RADIUS_M + NAIL_RADIUS_M;
+    // Both balls strike on the same step: one at about 0.5 m/s, one at about 2.
+    addBall(world, { x: 0, y: contactY + 0.0002, vy: -0.5 });
+    addBall(world, { x: 0.1, y: contactY + 0.0008, vy: -2 });
+    expect(firstImpact(world, 1)).toBeCloseTo(2, 2);
+  });
+});

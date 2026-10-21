@@ -189,6 +189,13 @@ export interface World {
   readonly segmentOff: Uint8Array;
   /** Balls captured by sensors during the latest step, in ball order. Replaced every step. */
   captures: readonly Capture[];
+  /**
+   * Fastest impact during the latest step, as the speed of approach along
+   * the contact normal in m/s: a ball into a nail or rail, or two balls into
+   * each other. 0 with none. Replaced every step; only read for presentation
+   * (M6's rattle), never by the physics.
+   */
+  impactSpeedMps: number;
   /** Spatial hash over circles and segments, or null to test every shape (and every pair of balls). */
   readonly grid: StaticGrid | null;
   /** Balls collide with each other. */
@@ -243,6 +250,7 @@ export function createWorld(options: WorldOptions = {}): World {
     gates,
     segmentOff,
     captures: NO_CAPTURES,
+    impactSpeedMps: 0,
     grid:
       options.broadphase === false
         ? null
@@ -391,6 +399,7 @@ export function stepWorld(world: World): readonly Ball[] {
   let captures: Capture[] | null = null;
   const { balls, bounds } = world;
   const n = balls.length;
+  stepImpactSpeedMps = 0;
 
   if (stepSensors.length < n) stepSensors.length = n;
   if (world.ballCollisions && n > 1) {
@@ -417,6 +426,7 @@ export function stepWorld(world: World): readonly Ball[] {
   }
 
   world.captures = captures ?? NO_CAPTURES;
+  world.impactSpeedMps = stepImpactSpeedMps;
   world.steps += 1;
   // Derive time from the step count so it never accumulates float error.
   world.timeS = world.steps * SIM_STEP_S;
@@ -425,6 +435,14 @@ export function stepWorld(world: World): readonly Ball[] {
 
 /** Per ball (indexed like world.balls), the sensor that captured it this step. */
 const stepSensors: (SensorShape | null)[] = [];
+
+/** The step's fastest impact so far, for world.impactSpeedMps. */
+let stepImpactSpeedMps = 0;
+
+/** Note an impact approaching at `speedMps` along its normal (≤ 0: separating, not an impact). */
+function noteImpact(speedMps: number): void {
+  if (speedMps > stepImpactSpeedMps) stepImpactSpeedMps = speedMps;
+}
 
 /**
  * Start a ball's step: remember where it was, for render interpolation, and
@@ -579,6 +597,7 @@ function moveAlone(
     ball.x += dx * event.t;
     ball.y += dy * event.t;
     remainingS *= 1 - event.t;
+    noteImpact(-(ball.vx * event.nx + ball.vy * event.ny));
     resolveContact(ball, event.nx, event.ny, event.material, GRAVITY_DV_MPS);
     touched = true;
     if (remainingS <= 0) break;
@@ -872,8 +891,9 @@ function moveTogether(world: World): void {
       const ny = eventNy[i] as number;
       const material = eventMaterial[i] as Material;
       // A resting contact leaves the ball sliding along the surface.
-      const resting =
-        -(ball.vx * nx + ball.vy * ny) < restingSpeedMps(material.restitution, GRAVITY_DV_MPS);
+      const approachMps = -(ball.vx * nx + ball.vy * ny);
+      noteImpact(approachMps);
+      const resting = approachMps < restingSpeedMps(material.restitution, GRAVITY_DV_MPS);
       slideCircle[i] = resting ? (eventCircle[i] as number) : -1;
       slideSegment[i] = resting ? (eventSegment[i] as number) : -1;
       resolveContact(ball, nx, ny, material, GRAVITY_DV_MPS);
@@ -897,11 +917,14 @@ function moveTogether(world: World): void {
       remaining[b] = at;
       slidingNormal(world, a, surfaceA);
       slidingNormal(world, b, surfaceB);
+      const pnx = pairNx[bestPair] as number;
+      const pny = pairNy[bestPair] as number;
+      noteImpact(-((ballA.vx - ballB.vx) * pnx + (ballA.vy - ballB.vy) * pny));
       resolveBallContact(
         ballA,
         ballB,
-        pairNx[bestPair] as number,
-        pairNy[bestPair] as number,
+        pnx,
+        pny,
         BALL_RESTITUTION,
         GRAVITY_DV_MPS,
         surfaceA.x,
