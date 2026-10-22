@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { interpolate } from '../../src/render/balls';
+import { interpolate, spriteSizePx } from '../../src/render/balls';
 import { fitBoard } from '../../src/render/board';
 import { addBall, createWorld, stepWorld } from '../../src/sim/world';
 
@@ -52,5 +52,15 @@ describe('interpolate', () => {
   it('draws a ball that has not stepped yet at its spawn point', () => {
     const ball = addBall(createWorld(), { x: 0.1, y: 0.2, vx: 3 });
     expect(interpolate(ball, 0.7)).toEqual({ x: 0.1, y: 0.2 });
+  });
+});
+
+describe('spriteSizePx', () => {
+  it('fits the ball at the device ratio, with a pixel spare each side', () => {
+    expect(spriteSizePx(8, 1)).toBe(18);
+    expect(spriteSizePx(8, 2)).toBe(34);
+    // Rounds up, so a fractional radius never clips the rim.
+    expect(spriteSizePx(7.97, 2)).toBe(34);
+    expect(spriteSizePx(1.5, 1.25)).toBe(6);
   });
 });
