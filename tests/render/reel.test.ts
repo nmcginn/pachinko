@@ -26,6 +26,7 @@ describe('reelView', () => {
       holds: 0,
       round: 0,
       entries: 0,
+      celebrating: false,
     });
   });
 
@@ -75,7 +76,12 @@ describe('reelView', () => {
     const m = createMachine(createRng(1));
     forceJackpot(m);
     run(m, 1 + SPIN_STEPS);
-    expect(reelView(m)).toMatchObject({ phase: 'interval', status: 'JACKPOT!', round: 1 });
+    expect(reelView(m)).toMatchObject({
+      phase: 'interval',
+      status: 'JACKPOT!',
+      round: 1,
+      celebrating: true,
+    });
     run(m, ROUND_INTERVAL_STEPS);
     enterAttacker(m);
     enterAttacker(m);
@@ -84,6 +90,7 @@ describe('reelView', () => {
       status: 'ROUND 1/10 · IN 2/10',
       round: 1,
       entries: 2,
+      celebrating: false,
     });
     for (let i = 0; i < 8; i++) enterAttacker(m);
     stepMachine(m);
@@ -92,6 +99,7 @@ describe('reelView', () => {
       status: 'ROUND 2/10 next',
       round: 2,
       entries: 0,
+      celebrating: false,
     });
   });
 });

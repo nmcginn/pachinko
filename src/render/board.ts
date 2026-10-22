@@ -1,6 +1,6 @@
 // Board drawing: playfield, rails, nails, pockets, the attacker's lid while
 // its gate is closed, and each tulip's wings in its current shape, from the
-// board data and the world's gates.
+// board data and the world's gates. Then the glints on struck nails (M6).
 // Sim coordinates are metres with y up; here they become CSS pixels with y
 // down, fitted to the canvas with a margin.
 
@@ -8,11 +8,17 @@ import type { Board, PocketKind } from '../sim/board';
 import type { Vec2 } from '../sim/vec';
 import { type Gate, NAIL_RADIUS_M } from '../sim/world';
 import type { CanvasView } from './canvas';
+import { type Glints, glintLevel } from './glints';
 
 const BACKGROUND = '#14161a';
 const PLAYFIELD = '#1f3a2c';
 const RAIL = '#c9ccd2';
 const NAIL = '#c9a227';
+/** A struck nail's glint: a warm white glow and a four-point sparkle. */
+const GLINT_CORE = 'rgb(255 248 220';
+/** Glow and sparkle size at full strength, in nail radii (the ball is 5.5). */
+const GLINT_GLOW_RADII = 3.5;
+const GLINT_SPARKLE_RADII = 6;
 /** The attacker's lid and the tulips' wings: brass-coloured, so they read as parts that move. */
 const LID = '#e0b84a';
 const POCKET_FILL: Record<PocketKind, string> = {
@@ -122,4 +128,47 @@ export function drawBoard(
   }
   ctx.fill();
   return bv;
+}
+
+/**
+ * Draw the nails glinting at step `nowStep` over the board, from the
+ * glint tracker. Call between drawBoard and drawBalls. Returns how many
+ * nails it drew glinting.
+ */
+export function drawGlints(
+  view: CanvasView,
+  bv: BoardView,
+  board: Board,
+  glints: Readonly<Glints>,
+  nowStep: number,
+): number {
+  const { ctx } = view;
+  const r = Math.max(1, NAIL_RADIUS_M * bv.scale);
+  let drawn = 0;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(1, r * 0.6);
+  board.nails.forEach((n, i) => {
+    const level = glintLevel(glints, i, nowStep);
+    if (level <= 0) return;
+    drawn += 1;
+    const x = bv.ox + n.x * bv.scale;
+    const y = bv.oy - n.y * bv.scale;
+    const glow = r * (1 + (GLINT_GLOW_RADII - 1) * level);
+    const g = ctx.createRadialGradient(x, y, 0, x, y, glow);
+    g.addColorStop(0, `${GLINT_CORE} / ${level})`);
+    g.addColorStop(1, `${GLINT_CORE} / 0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, glow, 0, 2 * Math.PI);
+    ctx.fill();
+    const arm = r * GLINT_SPARKLE_RADII * level;
+    ctx.strokeStyle = `${GLINT_CORE} / ${0.8 * level})`;
+    ctx.beginPath();
+    ctx.moveTo(x - arm, y);
+    ctx.lineTo(x + arm, y);
+    ctx.moveTo(x, y - arm);
+    ctx.lineTo(x, y + arm);
+    ctx.stroke();
+  });
+  return drawn;
 }

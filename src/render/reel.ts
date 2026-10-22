@@ -7,6 +7,7 @@
 import type { Digits } from '../game/lottery';
 import { HOLD_LIMIT, REEL_SYMBOLS } from '../game/lottery';
 import { type Machine, ROUNDS, ROUND_BALLS, SPIN_STEPS } from '../game/machine';
+import { celebrating } from './celebration';
 
 /**
  * Height the reel panel takes at the top of the screen, CSS pixels. The
@@ -32,6 +33,8 @@ export interface ReelView {
   readonly round: number;
   /** Balls counted into the open round. */
   readonly entries: number;
+  /** The reel just showed a jackpot: the panel celebrates until round 1 opens. */
+  readonly celebrating: boolean;
 }
 
 /** What the panel shows for a machine state. Pure. */
@@ -46,7 +49,16 @@ export function reelView(machine: Readonly<Machine>): ReelView {
         ? (Math.floor(phase.elapsedSteps / STEPS_PER_SYMBOL) + 3 * i + d) % REEL_SYMBOLS
         : d,
     ) as [number, number, number];
-    return { digits, spinning, phase: 'spinning', status: '', holds, round: 0, entries: 0 };
+    return {
+      digits,
+      spinning,
+      phase: 'spinning',
+      status: '',
+      holds,
+      round: 0,
+      entries: 0,
+      celebrating: false,
+    };
   }
   const stopped = [false, false, false] as const;
   if (phase.kind === 'jackpot') {
@@ -63,6 +75,7 @@ export function reelView(machine: Readonly<Machine>): ReelView {
       holds,
       round: phase.round,
       entries: phase.open ? phase.entries : 0,
+      celebrating: celebrating(machine),
     };
   }
   return {
@@ -73,6 +86,7 @@ export function reelView(machine: Readonly<Machine>): ReelView {
     holds,
     round: 0,
     entries: 0,
+    celebrating: false,
   };
 }
 
@@ -118,6 +132,10 @@ export function createReel(els: ReelElements): Reel {
       set('phase', v.phase, () => {
         panel.dataset['phase'] = v.phase;
         panel.classList.toggle('jackpot', v.phase === 'round' || v.phase === 'interval');
+      });
+      set('celebrating', String(v.celebrating), () => {
+        panel.classList.toggle('celebrate', v.celebrating);
+        panel.dataset['celebrating'] = String(v.celebrating);
       });
       // While spinning these show the stopped result only once all three reels stop.
       const digits = v.phase === 'spinning' ? '' : v.digits.join('');

@@ -20,6 +20,17 @@ body {
   touch-action: none;
 }
 
+/* Jackpot screen flash. render/celebration.ts sets the opacity, in sim time,
+   and never under prefers-reduced-motion. Under the HUD and the reel, so
+   the reel's celebration reads through it. */
+#flash {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at 50% 30%, #fffbe8, #ffd36b);
+  opacity: 0;
+  pointer-events: none;
+}
+
 #debug {
   position: fixed;
   top: 8px;
@@ -123,6 +134,63 @@ body {
   border-color: #ff6a4d;
   color: #ffd36b;
   text-shadow: 0 0 8px rgb(255 200 90 / 0.8);
+}
+
+/* Reel celebration: from the moment the reel shows a jackpot until round 1
+   opens (render/celebration.ts). The digits bounce and the panel glows,
+   cycling red, gold and white. Reduced motion keeps the colours, still. */
+#reel.celebrate {
+  color: #fff3c4;
+  border-color: #ffd36b;
+  box-shadow:
+    inset 0 0 12px rgb(0 0 0 / 0.8),
+    0 0 18px 4px rgb(255 180 60 / 0.75);
+  animation: reel-glow 0.5s ease-in-out infinite alternate;
+}
+
+#reel.celebrate .reel-digit {
+  animation: reel-bounce 0.5s ease-in-out infinite alternate;
+}
+
+#reel.celebrate .reel-digit:nth-child(2) {
+  animation-delay: -0.17s;
+}
+
+#reel.celebrate .reel-digit:nth-child(3) {
+  animation-delay: -0.33s;
+}
+
+@keyframes reel-glow {
+  from {
+    border-color: #ff6a4d;
+    box-shadow:
+      inset 0 0 12px rgb(0 0 0 / 0.8),
+      0 0 10px 2px rgb(255 90 60 / 0.7);
+  }
+  to {
+    border-color: #fff3c4;
+    box-shadow:
+      inset 0 0 12px rgb(0 0 0 / 0.8),
+      0 0 24px 6px rgb(255 211 107 / 0.9);
+  }
+}
+
+@keyframes reel-bounce {
+  from {
+    transform: translateY(1px) scale(1);
+    text-shadow: 0 0 6px rgb(255 120 80 / 0.8);
+  }
+  to {
+    transform: translateY(-3px) scale(1.15);
+    text-shadow: 0 0 14px rgb(255 245 200 / 1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #reel.celebrate,
+  #reel.celebrate .reel-digit {
+    animation: none;
+  }
 }
 
 /* Sound toggle: bottom left, away from the handle. aria-pressed is muted. */

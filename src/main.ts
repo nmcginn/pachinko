@@ -14,9 +14,11 @@ import { bindDial, bindKeyboard, createHolds } from './input/launcher';
 import { bindMute, loadMuted } from './input/mute';
 import { bindVisibility, createClock, createLoop } from './loop';
 import { drawBalls } from './render/balls';
-import { drawBoard } from './render/board';
+import { drawBoard, drawGlints } from './render/board';
 import { attachCanvas } from './render/canvas';
+import { createFlash } from './render/celebration';
 import { createDebugOverlay } from './render/debug';
+import { collectGlints, createGlints } from './render/glints';
 import { createHud } from './render/hud';
 import { REEL_BAND_PX, createReel } from './render/reel';
 import { parseBoard } from './sim/board';
@@ -34,7 +36,8 @@ function byId<T extends HTMLElement>(id: string, type: new () => T): T {
   return el;
 }
 
-const view = attachCanvas(byId('board', HTMLCanvasElement));
+const canvas = byId('board', HTMLCanvasElement);
+const view = attachCanvas(canvas);
 const overlay = createDebugOverlay(byId('debug', HTMLElement));
 const hud = createHud({
   balls: byId('balls', HTMLElement),
@@ -77,6 +80,10 @@ const sound = createSound(
 bindUnlock(window, sound);
 bindMute(window, byId('mute', HTMLButtonElement), sound, storage);
 const cues = createCueTracker(table);
+const glints = createGlints(table.world);
+// No screen flash for players who ask for less motion (M8 builds on this).
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const flash = createFlash(byId('flash', HTMLElement), () => reducedMotion.matches);
 
 const loop = createLoop(
   {
@@ -88,13 +95,19 @@ const loop = createLoop(
     step: () => {
       stepTable(table);
       collectCues(cues, table);
+      collectGlints(glints, table.world);
     },
     render: (frame) => {
       sound.play(drainCues(cues));
       const bv = drawBoard(view, table.board, table.world.gates, REEL_BAND_PX);
+      const glinting = drawGlints(view, bv, table.board, glints, table.world.steps);
+      // For tests: nails glinting in this frame. Only written when it changes.
+      if (canvas.dataset['glints'] !== String(glinting))
+        canvas.dataset['glints'] = String(glinting);
       drawBalls(view, bv, table.world.balls, frame.alpha);
       hud.update(table.economy, table.fire, table.world.balls.length);
       reel.update(table.machine);
+      flash.update(table.machine);
       overlay.update(frame, table.world);
     },
   },
