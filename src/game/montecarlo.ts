@@ -218,7 +218,9 @@ export function runBatch(board: Board, options: BatchOptions): Tally {
   };
 
   while (pending > 0) {
-    if (stepFire(fire, launcherClear(world, board))) {
+    // stepFire only looks at the lane when its cooldown runs out this step,
+    // so skip the check before then: it tests every ball in play.
+    if (stepFire(fire, fire.cooldownSteps > 1 || launcherClear(world, board))) {
       const index = offset + world.nextBallId;
       launchBall(world, board, power, createRng(streamSeed(seed, index)));
       launchStep.push(world.steps);
@@ -226,26 +228,34 @@ export function runBatch(board: Board, options: BatchOptions): Tally {
     }
     tally.ballSteps += world.balls.length;
     if (tulips.length > 0) {
+      // Indexed loops: for…of here allocated an iterator every step, about
+      // a third of a run's garbage.
       let inPlay = 0;
-      for (const ball of world.balls) if (counted(ball)) inPlay += 1;
-      for (const { gate, tally: t } of tulips) {
+      for (let i = 0; i < world.balls.length; i++) if (counted(world.balls[i] as Ball)) inPlay += 1;
+      for (let i = 0; i < tulips.length; i++) {
+        const { gate, tally: t } = tulips[i] as (typeof tulips)[number];
         if (gate.open) t.openBallSteps += inPlay;
         else t.closedBallSteps += inPlay;
       }
     }
     const removed = stepWorld(world);
-    for (const ball of removed) {
-      // A ball removed without a capture left the board.
-      if (counted(ball) && !world.captures.some((c) => c.ball === ball)) {
-        tally.lost += 1;
-        pending -= 1;
+    // Most steps remove nothing. The length checks matter: iterating the
+    // frozen empty arrays stepWorld hands back then was 4% of a run.
+    if (removed.length > 0) {
+      for (const ball of removed) {
+        // A ball removed without a capture left the board.
+        if (counted(ball) && !world.captures.some((c) => c.ball === ball)) {
+          tally.lost += 1;
+          pending -= 1;
+        }
       }
+      for (const capture of world.captures) settle(capture);
     }
-    for (const capture of world.captures) settle(capture);
-    // Give up on balls in play too long.
-    for (let i = world.balls.length - 1; i >= 0; i--) {
-      const ball = world.balls[i] as Ball;
-      if (world.steps - (launchStep[ball.id - 1] as number) < maxSteps) continue;
+    // Give up on balls in play too long. Balls are in launch order, so those
+    // are the first few.
+    while (world.balls.length > 0) {
+      const ball = world.balls[0] as Ball;
+      if (world.steps - (launchStep[ball.id - 1] as number) < maxSteps) break;
       if (counted(ball)) {
         tally.stuck += 1;
         pending -= 1;
