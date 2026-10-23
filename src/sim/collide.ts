@@ -178,6 +178,40 @@ export function sweepDisc(
   return true;
 }
 
+/**
+ * Margin on moveOutOfReach. The sweeps' rounding is around 1e-15 m at board
+ * scale and their contact slop 1e-9 m; this is far beyond both.
+ */
+export const REACH_SLOP_M = 1e-6;
+
+/**
+ * Whether a point moving from (px, py) by (dx, dy) stays out of reach of the
+ * box [minX, maxX] × [minY, maxY]: along x or along y, every point of the move
+ * is more than rM + REACH_SLOP_M from it. If so, sweepDisc against a disc of
+ * radius rM centred in the box, and sweepCapsule of radius rM against a
+ * segment inside it, both report no hit, so a caller may skip them. Cheaper
+ * than either sweep; the world culls most of a grid cell's shapes with it.
+ */
+export function moveOutOfReach(
+  px: number,
+  py: number,
+  dx: number,
+  dy: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  rM: number,
+): boolean {
+  const reach = rM + REACH_SLOP_M;
+  return (
+    Math.min(px, px + dx) > maxX + reach ||
+    Math.max(px, px + dx) < minX - reach ||
+    Math.min(py, py + dy) > maxY + reach ||
+    Math.max(py, py + dy) < minY - reach
+  );
+}
+
 const capHit = createHit();
 
 /**
