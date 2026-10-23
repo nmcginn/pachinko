@@ -28,6 +28,7 @@ import {
   type SegmentShape,
   CONTACT_SLOP_M,
   createHit,
+  moveOutOfReach,
   resolveBallContact,
   resolveContact,
   restingSpeedMps,
@@ -46,6 +47,7 @@ const queryGridFn = queryGrid;
 const sweepDiscFn = sweepDisc;
 const sweepCapsuleFn = sweepCapsule;
 const sensorEntryTFn = sensorEntryT;
+const moveOutOfReachFn = moveOutOfReach;
 
 /** Sim timestep. PLAN.md: 1/2000 s or finer, so a ball at max launch speed moves less than its radius per step. */
 export const SIM_STEP_S = 1 / 2000;
@@ -420,7 +422,9 @@ export function stepWorld(world: World): readonly Ball[] {
       (removed ??= []).push(ball);
     }
   }
-  stepSensors.fill(null, 0, n);
+  // A loop, not fill(): this runs every step, mostly for two or three balls,
+  // and the builtin's call overhead was 6% of a Monte Carlo run.
+  for (let i = 0; i < n; i++) stepSensors[i] = null;
   if (removed) {
     for (const ball of removed) removeBall(world, ball.id);
   }
@@ -495,7 +499,15 @@ const event: StaticEvent = {
   segment: -1,
 };
 
-/** Sweep the move from (x, y) by (dx, dy) against every nail, rail, and pocket. */
+/**
+ * Sweep the move from (x, y) by (dx, dy) against every nail, rail, and pocket.
+ *
+ * Shapes out of the move's reach are skipped with a box test
+ * (moveOutOfReach) before the sweep, which would report no hit for them
+ * anyway. A grid cell lists every shape a ball anywhere in its 20 mm could
+ * touch, but a move is a millimetre or two, so most are out of reach: the
+ * test skips 95% of nail sweeps and 70% of rail sweeps on the classic board.
+ */
 function findStaticEvent(
   world: World,
   x: number,
@@ -515,9 +527,16 @@ function findStaticEvent(
     everyShape(world, candidates);
   }
   const { segmentOff } = world;
-  for (const ci of candidates.circles) {
+  // Indexed loops, not for…of: the lists are sometimes the grid's frozen
+  // empty array and sometimes plain arrays, and over that mix V8 allocated
+  // an iterator and its results on every pass.
+  const circleList = candidates.circles;
+  for (let k = 0; k < circleList.length; k++) {
+    const ci = circleList[k] as number;
     const c = world.circles[ci] as CircleShape;
-    if (sweepDiscFn(x, y, dx, dy, c.x, c.y, BALL_RADIUS_M + c.radiusM, hit)) {
+    const reachM = BALL_RADIUS_M + c.radiusM;
+    if (moveOutOfReachFn(x, y, dx, dy, c.x, c.y, c.x, c.y, reachM)) continue;
+    if (sweepDiscFn(x, y, dx, dy, c.x, c.y, reachM, hit)) {
       if (hit.t < best.t) {
         best.t = hit.t;
         best.nx = hit.nx;
@@ -527,9 +546,16 @@ function findStaticEvent(
       }
     }
   }
-  for (const si of candidates.segments) {
+  const segmentList = candidates.segments;
+  for (let k = 0; k < segmentList.length; k++) {
+    const si = segmentList[k] as number;
     if (segmentOff[si]) continue;
     const s = world.segments[si] as SegmentShape;
+    const minX = s.ax < s.bx ? s.ax : s.bx;
+    const maxX = s.ax < s.bx ? s.bx : s.ax;
+    const minY = s.ay < s.by ? s.ay : s.by;
+    const maxY = s.ay < s.by ? s.by : s.ay;
+    if (moveOutOfReachFn(x, y, dx, dy, minX, minY, maxX, maxY, BALL_RADIUS_M)) continue;
     if (sweepCapsuleFn(x, y, dx, dy, s, BALL_RADIUS_M, hit)) {
       if (hit.t < best.t) {
         best.t = hit.t;
@@ -548,7 +574,9 @@ function findStaticEvent(
   let sensorT = material ? best.t : 1;
   // Above every sensor, sensorEntryT would return Infinity for each.
   if (Math.min(y, y + dy) <= world.sensorsTopY) {
-    for (const p of world.sensors) {
+    const { sensors } = world;
+    for (let k = 0; k < sensors.length; k++) {
+      const p = sensors[k] as SensorShape;
       const t = sensorEntryTFn(p, x, y, dx, dy);
       if (t <= sensorT && (!sensor || t < sensorT)) {
         sensor = p;
@@ -645,9 +673,14 @@ let cellX = new Float64Array(0);
 let cellY = new Float64Array(0);
 let hashNext = new Int32Array(0);
 let hashHead = new Int32Array(0);
-/** Pairs of balls (indices, a < b) that could meet this step, sorted by a then b. */
-const pairA: number[] = [];
-const pairB: number[] = [];
+/**
+ * Pairs of balls (indices, a < b) that could meet this step, sorted by a then
+ * b: the first pairCount entries. Typed arrays reused from step to step, not
+ * arrays emptied with `length = 0`, which V8 frees and has to regrow.
+ */
+let pairA = new Int32Array(16);
+let pairB = new Int32Array(16);
+let pairCount = 0;
 let pairRemaining = new Float64Array(0);
 let pairNx = new Float64Array(0);
 let pairNy = new Float64Array(0);
@@ -706,7 +739,7 @@ function stepBallsTogether(world: World): void {
   // apart than this at the start can't meet.
   const reachM = 2 * BALL_RADIUS_M + 2 * Math.sqrt(speedSqSum) * SIM_STEP_S + PAIR_REACH_SLOP_M;
   findPairs(world, reachM);
-  for (let p = 0; p < pairA.length; p++) {
+  for (let p = 0; p < pairCount; p++) {
     mode[pairA[p] as number] = TOGETHER;
     mode[pairB[p] as number] = TOGETHER;
   }
@@ -721,7 +754,7 @@ function stepBallsTogether(world: World): void {
       );
     }
   }
-  if (pairA.length > 0) moveTogether(world);
+  if (pairCount > 0) moveTogether(world);
 }
 
 /** Hash bucket of grid cell (cx, cy), in a table of mask + 1 buckets. */
@@ -745,8 +778,7 @@ const HASH_MIN_BALLS = 8;
 function findPairs(world: World, reachM: number): void {
   const { balls } = world;
   const n = balls.length;
-  pairA.length = 0;
-  pairB.length = 0;
+  pairCount = 0;
   if (!world.grid) {
     for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) pushPair(a, b);
     return;
@@ -777,7 +809,7 @@ function findPairs(world: World, reachM: number): void {
     hashHead[h] = i;
   }
   for (let a = 0; a < n; a++) {
-    const first = pairA.length;
+    const first = pairCount;
     const ax = startX[a] as number;
     const ay = startY[a] as number;
     for (let ox = -1; ox <= 1; ox++) {
@@ -798,7 +830,7 @@ function findPairs(world: World, reachM: number): void {
     }
     // Sort this ball's partners ascending, so ties break the same way as
     // without the hash. Lists are short; insertion sort.
-    for (let i = first + 1; i < pairB.length; i++) {
+    for (let i = first + 1; i < pairCount; i++) {
       const v = pairB[i] as number;
       let j = i - 1;
       while (j >= first && (pairB[j] as number) > v) {
@@ -811,8 +843,17 @@ function findPairs(world: World, reachM: number): void {
 }
 
 function pushPair(a: number, b: number): void {
-  pairA.push(a);
-  pairB.push(b);
+  if (pairCount === pairA.length) {
+    const grownA = new Int32Array(2 * pairCount);
+    const grownB = new Int32Array(2 * pairCount);
+    grownA.set(pairA);
+    grownB.set(pairB);
+    pairA = grownA;
+    pairB = grownB;
+  }
+  pairA[pairCount] = a;
+  pairB[pairCount] = b;
+  pairCount++;
 }
 
 /**
@@ -827,7 +868,7 @@ function pushPair(a: number, b: number): void {
 function moveTogether(world: World): void {
   const { balls } = world;
   const n = balls.length;
-  const pairs = pairA.length;
+  const pairs = pairCount;
   if (pairRemaining.length < pairs) {
     const size = Math.max(pairs, 2 * pairRemaining.length);
     pairRemaining = new Float64Array(size);

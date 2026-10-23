@@ -73,6 +73,59 @@ describe('montecarlo: runBatch', () => {
     expect(b).toEqual(a);
   });
 
+  // Pinned tallies, to the ball-step, recorded on master before the step's
+  // performance work of 2026-10-23. A change that only makes the sim faster
+  // must leave them exactly as they are; ballSteps moves if any ball's flight
+  // changes by a single step. A deliberate physics or board change will move
+  // them too: re-record them then, with the before and after Monte Carlo
+  // numbers in PHYSICS.md's tuning log.
+  it('gives exactly the recorded tallies (pinned, to catch a speed-up that changes results)', () => {
+    expect(runBatch(classic, { power: BEST_POWER, seed: 1, first: 1000, count: 300 })).toEqual({
+      launched: 300,
+      entries: { start: 23, out: 261, foul: 0, attacker: 0, tulip: 16 },
+      lost: 0,
+      stuck: 0,
+      ballSteps: 1063717,
+      tulips: {
+        'tulip-left': {
+          openEntries: 4,
+          closedEntries: 4,
+          openBallSteps: 92178,
+          closedBallSteps: 933018,
+        },
+        'tulip-right': {
+          openEntries: 4,
+          closedEntries: 4,
+          openBallSteps: 117480,
+          closedBallSteps: 907716,
+        },
+      },
+    });
+    expect(
+      runBatch(classic, { power: 0.62, seed: 5, count: 150, gatesOpen: true, tulips: 'open' }),
+    ).toEqual({
+      launched: 150,
+      entries: { start: 1, out: 124, foul: 0, attacker: 12, tulip: 13 },
+      lost: 0,
+      stuck: 0,
+      ballSteps: 361753,
+      tulips: {
+        'tulip-left': {
+          openEntries: 0,
+          closedEntries: 0,
+          openBallSteps: 359773,
+          closedBallSteps: 0,
+        },
+        'tulip-right': {
+          openEntries: 13,
+          closedEntries: 0,
+          openBallSteps: 359773,
+          closedBallSteps: 0,
+        },
+      },
+    });
+  });
+
   it('gives a different run for a different seed', () => {
     const a = runBatch(classic, { power: BEST_POWER, seed: 1, count: 150 });
     const b = runBatch(classic, { power: BEST_POWER, seed: 2, count: 150 });
