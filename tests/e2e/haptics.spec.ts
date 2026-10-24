@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const calls: number[][] = [];
     window.__vibrations = calls;
-    Navigator.prototype.vibrate = function (pattern: VibratePattern) {
+    Navigator.prototype.vibrate = function (pattern: number | Iterable<number>) {
       calls.push(typeof pattern === 'number' ? [pattern] : [...pattern]);
       return true;
     };
