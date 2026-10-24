@@ -193,8 +193,10 @@ body {
   }
 }
 
-/* Sound toggle: bottom left, away from the handle. aria-pressed is muted. */
-#mute {
+/* Sound toggle: bottom left, away from the handle. aria-pressed is muted.
+   The vibration toggle sits above it, on touch screens only. */
+#mute,
+#vibration {
   position: fixed;
   left: 16px;
   bottom: 16px;
@@ -210,9 +212,18 @@ body {
   cursor: pointer;
 }
 
-#mute[aria-pressed='true'] {
+#mute[aria-pressed='true'],
+#vibration[aria-pressed='false'] {
   border-color: #5b5f66;
   color: #9a978f;
+}
+
+#vibration {
+  bottom: 68px;
+}
+
+#vibration[hidden] {
+  display: none;
 }
 
 /* Launch handle: bottom right, under the right thumb on a phone. */
