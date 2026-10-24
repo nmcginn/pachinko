@@ -9,9 +9,11 @@ import classicBoard from '../boards/classic.json';
 import { collectCues, createCueTracker, drainCues } from './audio/cues';
 import { bindUnlock, createSound } from './audio/sound';
 import { createTable, stepTable } from './game/table';
+import { createHaptics } from './haptics/haptics';
 import { bindDebugKeys } from './input/debug';
 import { bindDial, bindKeyboard, createHolds } from './input/launcher';
 import { bindMute, loadMuted } from './input/mute';
+import { bindVibration, hapticsSupported, loadVibration } from './input/vibration';
 import { bindVisibility, createClock, createLoop } from './loop';
 import { drawBalls } from './render/balls';
 import { drawBoard, drawGlints } from './render/board';
@@ -79,6 +81,23 @@ const sound = createSound(
 );
 bindUnlock(window, sound);
 bindMute(window, byId('mute', HTMLButtonElement), sound, storage);
+// Haptics on touch screens with the Vibration API, after the first
+// interaction (browsers block vibrate() before one). Where
+// navigator.userActivation is missing, the first interaction is our own
+// count, the same as the sound's.
+let interacted = false;
+bindUnlock(window, { unlock: () => (interacted = true) });
+const haptics = hapticsSupported(navigator, window.matchMedia('(pointer: coarse)').matches)
+  ? createHaptics(
+      {
+        vibrate: (pattern) => navigator.vibrate(pattern),
+        now: () => performance.now(),
+        activated: () => navigator.userActivation?.hasBeenActive ?? interacted,
+      },
+      { enabled: loadVibration(storage) },
+    )
+  : null;
+if (haptics) bindVibration(window, byId('vibration', HTMLButtonElement), haptics, storage);
 const cues = createCueTracker(table);
 const glints = createGlints(table.world);
 // No screen flash for players who ask for less motion (M8 builds on this).
@@ -98,7 +117,9 @@ const loop = createLoop(
       collectGlints(glints, table.world);
     },
     render: (frame) => {
-      sound.play(drainCues(cues));
+      const frameCues = drainCues(cues);
+      sound.play(frameCues);
+      haptics?.play(frameCues);
       const bv = drawBoard(view, table.board, table.world.gates, REEL_BAND_PX);
       const glinting = drawGlints(view, bv, table.board, glints, table.world.steps);
       // For tests: nails glinting in this frame. Only written when it changes.

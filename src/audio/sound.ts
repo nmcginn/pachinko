@@ -106,7 +106,7 @@ export function createSound(host: AudioHost, options: { muted?: boolean } = {}):
  * listening. Capture phase, so a handler that stops propagation can't keep
  * the sound locked. Returns an unbind function.
  */
-export function bindUnlock(target: EventTarget, sound: Sound): () => void {
+export function bindUnlock(target: EventTarget, sound: Pick<Sound, 'unlock'>): () => void {
   // An abort signal removes all three at once (and, unlike a matching
   // removeEventListener call, also works on Node's EventTarget in tests).
   const listening = new AbortController();
