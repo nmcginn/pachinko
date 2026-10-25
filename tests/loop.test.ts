@@ -206,6 +206,49 @@ describe('createLoop', () => {
   });
 });
 
+describe('createLoop work timing', () => {
+  /** A loop whose host clock the steps and render advance: 0.01 ms a step, 2 ms a render. */
+  function timedLoop(withNow = true) {
+    const raf = fakeHost();
+    let clockMs = 0;
+    const host: FrameHost = withNow ? { ...raf.host, now: () => clockMs } : raf.host;
+    const measured: [number, FrameInfo][] = [];
+    const loop = createLoop(host, createClock(STEP_S, 0.1), {
+      step: () => void (clockMs += 0.01),
+      render: () => void (clockMs += 2),
+      measured: (workMs, frame) => void measured.push([workMs, frame]),
+    });
+    return { raf, loop, measured };
+  }
+
+  it("reports each frame's steps plus render, after render", () => {
+    const t = timedLoop();
+    t.loop.start();
+    t.raf.frame(0);
+    t.raf.frame(10); // 20 steps
+    expect(t.measured).toHaveLength(2);
+    expect(t.measured[0]?.[0]).toBeCloseTo(2, 9);
+    expect(t.measured[1]?.[0]).toBeCloseTo(20 * 0.01 + 2, 9);
+    expect(t.measured[1]?.[1]).toMatchObject({ steps: 20 });
+  });
+
+  it('times the work, not the gap since the last frame', () => {
+    const t = timedLoop();
+    t.loop.start();
+    t.raf.frame(0);
+    t.raf.frame(100); // a long gap: capped at 0.1 s, 200 steps
+    expect(t.measured[1]?.[0]).toBeCloseTo(200 * 0.01 + 2, 9);
+  });
+
+  it('reports nothing when the host has no clock', () => {
+    const t = timedLoop(false);
+    t.loop.start();
+    t.raf.frame(0);
+    t.raf.frame(10);
+    expect(t.measured).toEqual([]);
+  });
+});
+
 function fakeDocument(hidden: boolean) {
   const listeners = new Set<() => void>();
   const doc: VisibilitySource & { hidden: boolean } = {

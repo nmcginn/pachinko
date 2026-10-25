@@ -57,6 +57,8 @@ export function advanceClock(clock: FixedStepClock, frameDtS: number): ClockAdva
 export interface FrameHost {
   requestFrame(callback: (nowMs: number) => void): number;
   cancelFrame(handle: number): void;
+  /** A clock in ms (performance.now). Needed only for LoopCallbacks.measured. */
+  now?(): number;
 }
 
 export interface FrameInfo {
@@ -72,6 +74,11 @@ export interface LoopCallbacks {
   step(): void;
   /** Draw the current state. Must not advance the sim. */
   render(frame: FrameInfo): void;
+  /**
+   * After render, with the frame's work time: this frame's steps and its
+   * render, by the host's `now`, in ms. Called only when the host has one.
+   */
+  measured?(workMs: number, frame: FrameInfo): void;
 }
 
 export interface Loop {
@@ -93,9 +100,16 @@ export function createLoop(host: FrameHost, clock: FixedStepClock, callbacks: Lo
     const frameDtS = lastMs === null ? 0 : (nowMs - lastMs) / 1000;
     lastMs = nowMs;
 
+    // The rAF timestamp is the frame's start, not when this callback runs,
+    // so work time takes its own reading before and after.
+    const startMs = host.now?.();
     const { steps, alpha, droppedS } = advanceClock(clock, frameDtS);
     for (let i = 0; i < steps; i++) callbacks.step();
-    callbacks.render({ frameDtS, steps, alpha, droppedS });
+    const frame = { frameDtS, steps, alpha, droppedS };
+    callbacks.render(frame);
+    if (startMs !== undefined && host.now && callbacks.measured) {
+      callbacks.measured(host.now() - startMs, frame);
+    }
 
     if (running) handle = host.requestFrame(tick);
   };
