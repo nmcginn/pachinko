@@ -325,4 +325,102 @@ describe('table', () => {
       expect(run()).toEqual(a);
     });
   });
+
+  describe("keepInPlay (the debug load for M6's frame-time check)", () => {
+    /** Balls in play after each step, over `simS` seconds. */
+    const inPlay = (table: Table, simS: number): number[] => {
+      const counts: number[] = [];
+      for (let i = 0; i < steps(simS); i++) {
+        stepTable(table);
+        counts.push(table.world.balls.length);
+      }
+      return counts;
+    };
+
+    it('fills the board to 30 balls in play, and never past it', () => {
+      const table = createTable(classic, { seed: 1, keepInPlay: 30 });
+      table.fire.power = 1;
+      const counts = inPlay(table, 10);
+      expect(Math.max(...counts)).toBe(30);
+      // Full within 3 s, and nearly always full after that.
+      const after = counts.slice(steps(3));
+      expect(after.filter((n) => n === 30).length / after.length).toBeGreaterThan(0.9);
+      expect(Math.min(...after)).toBeGreaterThanOrEqual(25);
+    });
+
+    it('launches without the handle held and without the auto-fire cap', () => {
+      const table = createTable(classic, { seed: 1, keepInPlay: 30 });
+      table.fire.power = 1;
+      inPlay(table, 1);
+      // The handle alone could fire at most twice in 1 s.
+      expect(table.freeBalls.size).toBeGreaterThan(10);
+      expect(table.fire.held).toBe(false);
+    });
+
+    it('free balls never touch the tray or the tallies, but still spin the reel', () => {
+      const table = createTable(classic, { seed: 1, keepInPlay: 30 });
+      table.fire.power = BEST_POWER;
+      inPlay(table, 20);
+      expect(table.economy).toEqual({
+        balls: 250,
+        launched: 0,
+        entries: { start: 0, out: 0, foul: 0, attacker: 0, tulip: 0 },
+        paidOut: 0,
+      });
+      expect(table.machine.spins).toBeGreaterThan(0);
+      // Exactly the balls in play are free: none leaks once it has left.
+      expect([...table.freeBalls].sort((a, b) => a - b)).toEqual(
+        table.world.balls.map((b) => b.id).sort((a, b) => a - b),
+      );
+    });
+
+    it("the handle's own balls play and pay as usual alongside", () => {
+      const table = createTable(classic, { seed: 1, keepInPlay: 30 });
+      table.fire.power = BEST_POWER;
+      table.fire.held = true;
+      inPlay(table, 20);
+      const { economy } = table;
+      const { start, out, foul, attacker, tulip } = economy.entries;
+      expect(economy.launched).toBeGreaterThan(0);
+      expect(start + out + foul + attacker + tulip).toBeGreaterThan(0);
+      // The tray balances against the handle's balls alone.
+      const own = table.world.balls.filter((b) => !table.freeBalls.has(b.id)).length;
+      expect(economy.balls + own).toBe(250 - start - out - attacker - tulip + economy.paidOut);
+    });
+
+    it('is off at 0, the default', () => {
+      for (const options of [{}, { keepInPlay: 0 }]) {
+        const table = createTable(classic, options);
+        expect(inPlay(table, 1).every((n) => n === 0)).toBe(true);
+      }
+    });
+
+    it('keeps one ball in play at 1', () => {
+      const table = createTable(classic, { seed: 1, keepInPlay: 1 });
+      table.fire.power = 1;
+      const counts = inPlay(table, 5);
+      expect(counts[0]).toBe(1);
+      expect(Math.max(...counts)).toBe(1);
+    });
+
+    it('rejects a negative or fractional count', () => {
+      for (const keepInPlay of [-1, 1.5, Number.NaN, Infinity]) {
+        expect(() => createTable(classic, { keepInPlay })).toThrow(RangeError);
+      }
+    });
+
+    it('plays out identically twice', () => {
+      const run = () => {
+        const table = createTable(classic, { seed: 7, keepInPlay: 30 });
+        table.fire.power = 1;
+        const out: number[] = [];
+        for (let i = 0; i < steps(5); i++) {
+          stepTable(table);
+          for (const b of table.world.balls) out.push(b.id, b.x, b.y);
+        }
+        return out;
+      };
+      expect(run()).toEqual(run());
+    });
+  });
 });

@@ -66,7 +66,25 @@ function pickSeed(): number {
   return crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
 }
 
-const table = createTable(parseBoard(classicBoard), { seed: pickSeed() });
+/** Most balls `?inplay=N` will keep in play. */
+const MAX_IN_PLAY = 100;
+
+/**
+ * Debug load: `?inplay=N` keeps N free balls in play, launched at the
+ * handle power (TableOptions.keepInPlay), for checking frame time against
+ * M6's budget. Off without it, or for anything but a whole number from 0
+ * to MAX_IN_PLAY.
+ */
+function pickInPlay(): number {
+  const raw = new URLSearchParams(location.search).get('inplay');
+  const n = raw === null ? NaN : Number(raw);
+  return Number.isInteger(n) && n >= 0 && n <= MAX_IN_PLAY ? n : 0;
+}
+
+const table = createTable(parseBoard(classicBoard), {
+  seed: pickSeed(),
+  keepInPlay: pickInPlay(),
+});
 
 const holds = createHolds(table.fire);
 bindKeyboard(window, table.fire, holds);
@@ -108,6 +126,7 @@ const loop = createLoop(
   {
     requestFrame: (cb) => requestAnimationFrame(cb),
     cancelFrame: (handle) => cancelAnimationFrame(handle),
+    now: () => performance.now(),
   },
   createClock(SIM_STEP_S, MAX_FRAME_S),
   {
@@ -131,6 +150,7 @@ const loop = createLoop(
       flash.update(table.machine);
       overlay.update(frame, table.world);
     },
+    measured: (workMs) => overlay.measured(workMs, table.world.balls.length),
   },
 );
 
