@@ -64,10 +64,10 @@ describe('holds', () => {
 });
 
 describe('keyboard', () => {
-  function setup() {
+  function setup(active?: () => boolean) {
     const target = new EventTarget();
     const fire = createFireControl();
-    const unbind = bindKeyboard(target as unknown as Window, fire, createHolds(fire));
+    const unbind = bindKeyboard(target as unknown as Window, fire, createHolds(fire), active);
     const send = (type: string, props: { code?: string; key?: string }) => {
       const e = new Event(type, { cancelable: true });
       Object.assign(e, props);
@@ -130,5 +130,17 @@ describe('keyboard', () => {
     unbind();
     send('keydown', { code: 'Space', key: ' ' });
     expect(fire.held).toBe(false);
+  });
+
+  it('does nothing while inactive (adjusting nails), and works again after', () => {
+    let active = false;
+    const { fire, send } = setup(() => active);
+    const e = send('keydown', { code: 'ArrowUp', key: 'ArrowUp' });
+    send('keydown', { code: 'Space', key: ' ' });
+    expect(e.defaultPrevented).toBe(false);
+    expect(fire).toMatchObject({ held: false, power: 0.5 });
+    active = true;
+    send('keydown', { code: 'ArrowUp', key: 'ArrowUp' });
+    expect(fire.power).toBeCloseTo(0.5 + POWER_STEP, 12);
   });
 });

@@ -273,3 +273,107 @@ body {
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
+
+/* Nail adjustment (M7): the toggle at the bottom centre, between the sound
+   button and the handle. While editing, the panel sits above it on a
+   portrait screen, below the board, and beside the board on a landscape
+   one, so it never hides nails; the handle is hidden, since it does nothing
+   until play resumes. */
+#adjust {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  min-height: 44px;
+  padding: 0 16px;
+  font: inherit;
+  font-weight: 500;
+  font-size: 15px;
+  color: inherit;
+  background: rgb(0 0 0 / 0.55);
+  border: 2px solid #c9a227;
+  border-radius: 22px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#adjust[aria-pressed='true'] {
+  border-color: #6fd3ff;
+}
+
+#adjust-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 68px;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 32px));
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  background: rgb(0 0 0 / 0.7);
+  border: 2px solid #6fd3ff;
+  border-radius: 10px;
+}
+
+#adjust-panel[hidden] {
+  display: none;
+}
+
+#adjust-title {
+  font-weight: 500;
+  color: #6fd3ff;
+}
+
+#adjust-problem {
+  min-height: 1.2em;
+  font-size: 13px;
+  color: #ff9b8a;
+}
+
+#adjust-problem:empty {
+  display: none;
+}
+
+#adjust-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+#adjust-buttons button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 18px;
+  color: inherit;
+  background: #1d2026;
+  border: 2px solid #5b5f66;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+#adjust-buttons #nudge-reset {
+  font-size: 14px;
+  padding: 0 10px;
+}
+
+.editing #handle {
+  visibility: hidden;
+}
+
+/* Landscape: in the space left of the board, above the sound button. The
+   board is height-limited here, 0.5 / 0.53 of the height below the reel
+   band (REEL_BAND_PX) and its 16 px margins: 116 px in all. */
+@media (min-aspect-ratio: 1/1) {
+  #adjust-panel {
+    left: 16px;
+    bottom: 68px;
+    transform: none;
+    width: clamp(180px, calc((100vw - 0.9434 * (100vh - 116px)) / 2 - 32px), 300px);
+  }
+}

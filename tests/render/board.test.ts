@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { interpolate, spriteSizePx } from '../../src/render/balls';
-import { fitBoard } from '../../src/render/board';
+import { boardPointM, fitBoard } from '../../src/render/board';
 import { addBall, createWorld, stepWorld } from '../../src/sim/world';
 
 describe('fitBoard', () => {
@@ -62,5 +62,23 @@ describe('spriteSizePx', () => {
     // Rounds up, so a fractional radius never clips the rim.
     expect(spriteSizePx(7.97, 2)).toBe(34);
     expect(spriteSizePx(1.5, 1.25)).toBe(6);
+  });
+});
+
+describe('boardPointM', () => {
+  it('inverts the view: a board point drawn at (px, py) maps back to itself', () => {
+    const bv = fitBoard(1280, 800, 0.5, 0.53, 16, 84);
+    for (const [x, y] of [
+      [0, 0],
+      [0.5, 0.53],
+      [0.2573, 0.178],
+    ] as const) {
+      const p = boardPointM(bv, bv.ox + x * bv.scale, bv.oy - y * bv.scale);
+      expect(p.x).toBeCloseTo(x, 12);
+      expect(p.y).toBeCloseTo(y, 12);
+    }
+    // Above the board on screen is higher y; outside it, outside the board.
+    expect(boardPointM(bv, bv.ox, bv.oy - 10).y).toBeGreaterThan(0);
+    expect(boardPointM(bv, 0, 0).x).toBeLessThan(0);
   });
 });

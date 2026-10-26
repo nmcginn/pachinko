@@ -29,6 +29,21 @@
     <button id="vibration" type="button" aria-pressed="true" title="Vibration (V)" hidden>
       Vibration on
     </button>
+    <button id="adjust" type="button" aria-pressed="false" title="Adjust nails (E)">
+      Adjust nails
+    </button>
+    <div id="adjust-panel" role="group" aria-label="Nail adjustment" hidden>
+      <div id="adjust-title">Adjusting nails: play is paused</div>
+      <div id="adjust-selection" role="status"></div>
+      <div id="adjust-problem" role="alert"></div>
+      <div id="adjust-buttons">
+        <button id="nudge-left" type="button" aria-label="Nudge left 0.1 mm">←</button>
+        <button id="nudge-up" type="button" aria-label="Nudge up 0.1 mm">↑</button>
+        <button id="nudge-down" type="button" aria-label="Nudge down 0.1 mm">↓</button>
+        <button id="nudge-right" type="button" aria-label="Nudge right 0.1 mm">→</button>
+        <button id="nudge-reset" type="button">Reset nail</button>
+      </div>
+    </div>
     <div
       id="handle"
       role="slider"
