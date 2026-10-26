@@ -4,11 +4,18 @@ import {
   createBoardWorld,
   launchBall,
   launchSpeedMps,
+  moveNail,
+  nailMoveProblem,
   parseBoard,
   pocketKind,
 } from '../../src/sim/board';
 import { type Rng, createRng } from '../../src/sim/rng';
-import { LAUNCH_SPEED_SPREAD, MAX_LAUNCH_SPEED_MPS, NAIL_RADIUS_M } from '../../src/sim/world';
+import {
+  BALL_RADIUS_M,
+  LAUNCH_SPEED_SPREAD,
+  MAX_LAUNCH_SPEED_MPS,
+  NAIL_RADIUS_M,
+} from '../../src/sim/world';
 
 /** Smallest useful board: a bowl with an out-hole and a launcher above it. */
 function minimal(): Record<string, unknown> {
@@ -175,6 +182,23 @@ describe('parseBoard', () => {
     ).toEqual([]);
   });
 
+  it('rejects a nail that cuts through a rail, naming both', () => {
+    // The bowl's wall runs up x = 0.01.
+    const nailAt = (x: number) =>
+      issues(
+        edit(
+          (b) =>
+            (b['nails'] = [
+              [0.1, 0.1],
+              [x, 0.1],
+            ]),
+        ),
+      );
+    expect(nailAt(0.0105)).toEqual(['nails[1]: (0.0105, 0.1) overlaps rail "bowl"']);
+    expect(nailAt(0.01)).toEqual(['nails[1]: (0.01, 0.1) overlaps rail "bowl"']);
+    expect(nailAt(0.0115)).toEqual([]);
+  });
+
   it('rejects bad rails', () => {
     expect(issues(edit((b) => (b['rails'] = [{ id: 'r', points: [[0.1, 0.1]] }])))).toEqual([
       'rails[0].points: a rail needs at least 2 points, got 1',
@@ -254,6 +278,14 @@ describe('parseBoard', () => {
         { id: 'attacker', sensorId: 'attacker', segments: [2, 3], openSegments: [], open: false },
       ]);
       expect(world.segments).toHaveLength(4);
+    });
+
+    it('keep nails clear of the lid', () => {
+      const nailed = withPocket(attacker({ lid }));
+      (nailed['nails'] as unknown[]).push([0.16, 0.0595]);
+      expect(issues(nailed)).toEqual([
+        'nails[2]: (0.16, 0.0595) overlaps the lid of pocket "attacker"',
+      ]);
     });
 
     it('need a lid, and nothing else may have one', () => {
@@ -372,6 +404,15 @@ describe('parseBoard', () => {
       ]);
       expect([...world.segmentOff]).toEqual([0, 0, 0, 0, 1, 1]);
       expect(pocketKind(board, 'tulip')).toBe('tulip');
+    });
+
+    it('keep nails clear of the wings in both shapes', () => {
+      // On the open left wing's tip only, 18 mm from the closed one.
+      const nailed = withPocket(tulip({ wings }));
+      (nailed['nails'] as unknown[]).push([0.13, 0.0705]);
+      expect(issues(nailed)).toEqual([
+        'nails[2]: (0.13, 0.0705) overlaps a wing of pocket "tulip"',
+      ]);
     });
 
     it('need wings, and nothing else may have them', () => {
@@ -596,5 +637,73 @@ describe('launch', () => {
       expect(ball.vx).toBeCloseTo(0, 12);
       expect(ball.vy).toBeGreaterThan(0);
     });
+  });
+});
+
+describe('moveNail', () => {
+  const board = parseBoard(minimal());
+
+  it('returns a board with just that nail moved, leaving the original alone', () => {
+    const moved = moveNail(board, 1, { x: 0.1201, y: 0.0999 });
+    expect(moved.nails).toEqual([
+      { x: 0.1, y: 0.1 },
+      { x: 0.1201, y: 0.0999 },
+    ]);
+    expect(board.nails[1]).toEqual({ x: 0.12, y: 0.1 });
+    expect(moved.rails).toBe(board.rails);
+    expect(moved.pockets).toBe(board.pockets);
+    expect(moved.launcher).toBe(board.launcher);
+  });
+
+  it('agrees with parseBoard: a move it allows gives a board that parses the same', () => {
+    const moved = moveNail(board, 0, { x: 0.05, y: 0.06 });
+    const data = edit(
+      (b) =>
+        (b['nails'] = [
+          [0.05, 0.06],
+          [0.12, 0.1],
+        ]),
+    );
+    expect(parseBoard(data)).toEqual(moved);
+  });
+
+  it('refuses another nail, a rail, the edge of the board, and the launch point, naming them', () => {
+    const problem = (x: number, y: number) => nailMoveProblem(board, 1, { x, y });
+    expect(problem(0.1 + 1.5 * NAIL_RADIUS_M, 0.1)).toBe(
+      `(${0.1 + 1.5 * NAIL_RADIUS_M}, 0.1) overlaps nails[0] at (0.1, 0.1)`,
+    );
+    expect(problem(0.0105, 0.1)).toBe('(0.0105, 0.1) overlaps rail "bowl"');
+    expect(problem(0.21, 0.1)).toBe('(0.21, 0.1) is outside the 0.2 × 0.2 m board');
+    expect(problem(-0.001, 0.1)).toBe('(-0.001, 0.1) is outside the 0.2 × 0.2 m board');
+    // The launcher is at (0.05, 0.15): a ball there must stay clear of the nail.
+    const reach = BALL_RADIUS_M + NAIL_RADIUS_M;
+    expect(problem(0.05 + reach - 1e-6, 0.15)).toBe(
+      `(${0.05 + reach - 1e-6}, 0.15) blocks the launch point (0.05, 0.15)`,
+    );
+    expect(problem(0.05 + reach + 1e-6, 0.15)).toBeNull();
+    // Touching another nail exactly is allowed, as on load.
+    expect(problem(0.1 + 2 * NAIL_RADIUS_M, 0.1)).toBeNull();
+    // Staying put is fine.
+    expect(problem(0.12, 0.1)).toBeNull();
+  });
+
+  it('refuses a nail that does not exist and a point that is not finite', () => {
+    expect(nailMoveProblem(board, 2, { x: 0.1, y: 0.1 })).toBe('no nail 2; the board has 2');
+    expect(nailMoveProblem(board, -1, { x: 0.1, y: 0.1 })).toBe('no nail -1; the board has 2');
+    expect(nailMoveProblem(board, 0.5, { x: 0.1, y: 0.1 })).toBe('no nail 0.5; the board has 2');
+    expect(nailMoveProblem(board, 0, { x: NaN, y: 0.1 })).toBe('must be a finite point');
+    expect(nailMoveProblem(board, 0, { x: 0.1, y: Infinity })).toBe('must be a finite point');
+    const empty = parseBoard(edit((b) => (b['nails'] = [])));
+    expect(nailMoveProblem(empty, 0, { x: 0.1, y: 0.1 })).toBe('no nail 0; the board has 0');
+  });
+
+  it('throws a BoardError naming the nail, and changes nothing', () => {
+    expect(() => moveNail(board, 1, { x: 0.0105, y: 0.1 })).toThrow(BoardError);
+    try {
+      moveNail(board, 1, { x: 0.0105, y: 0.1 });
+    } catch (e) {
+      expect((e as BoardError).issues).toEqual(['nails[1]: (0.0105, 0.1) overlaps rail "bowl"']);
+    }
+    expect(board.nails[1]).toEqual({ x: 0.12, y: 0.1 });
   });
 });

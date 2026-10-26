@@ -25,13 +25,14 @@
 // each with the path of the offending item, so a hand-edited board fails
 // loudly at load time rather than as a ball doing something odd.
 
-import { createCircle, createPolyline } from './collide';
+import { CONTACT_SLOP_M, createCircle, createPolyline } from './collide';
 import type { Rng } from './rng';
 import { createSensor, polygonProblem, sensorContains } from './sensor';
 import type { Vec2 } from './vec';
 import {
   type Ball,
   type World,
+  BALL_RADIUS_M,
   LAUNCH_SPEED_SPREAD,
   MAX_LAUNCH_SPEED_MPS,
   NAIL_MATERIAL,
@@ -192,11 +193,12 @@ const fmt = (p: Vec2) => `(${p.x}, ${p.y})`;
 /**
  * Validate board JSON and return a Board. Throws a BoardError listing every
  * problem found. Checks shape and types, that all geometry lies on the board,
- * that nails don't overlap, rails have distinct consecutive points, pockets
- * are simple polygons, ids are unique, there is an out-hole for balls to
- * leave by, attackers (and only attackers) have a lid, tulips (and only
- * tulips) have wings in both shapes, and the launcher sits clear of
- * geometry, with every gate in either state, with a usable speed range.
+ * that nails don't overlap each other or cut through a rail, lid or wing,
+ * rails have distinct consecutive points, pockets are simple polygons, ids
+ * are unique, there is an out-hole for balls to leave by, attackers (and
+ * only attackers) have a lid, tulips (and only tulips) have wings in both
+ * shapes, and the launcher sits clear of geometry, with every gate in
+ * either state, with a usable speed range.
  */
 export function parseBoard(data: unknown): Board {
   const c = new Checker();
@@ -364,6 +366,14 @@ export function parseBoard(data: unknown): Board {
     c.fail('pockets', 'needs at least one "out" pocket, or balls can never leave');
   }
 
+  // A nail cutting through a rail, lid or wing is a typo in the data, not a
+  // layout; M7's nail adjustment refuses to move one there, and so does loading.
+  const lines = solidLines(rails, pockets);
+  nails.forEach((p, i) => {
+    const problem = nailLineProblem(p, lines);
+    if (problem) c.fail(`nails[${i}]`, `${fmt(p)} ${problem}`);
+  });
+
   // Launcher.
   let launcher: Launcher | null = null;
   const l = c.object(root['launcher'], 'launcher', ['x', 'y', 'angleDeg', 'minSpeedMps']);
@@ -408,6 +418,88 @@ export function parseBoard(data: unknown): Board {
   if (inPocket) c.fail('launcher', `${fmt(at)} is inside pocket "${inPocket.id}"`);
   if (c.issues.length > 0) throw new BoardError(c.issues);
   return board;
+}
+
+interface NamedLine {
+  /** For messages: 'rail "outer"', 'the lid of pocket "attacker"'. */
+  readonly name: string;
+  readonly points: readonly Vec2[];
+}
+
+/** Every line a nail must stay clear of: rails, lids, and tulip wings in both shapes. */
+function solidLines(rails: readonly Rail[], pockets: readonly Pocket[]): NamedLine[] {
+  const lines: NamedLine[] = rails.map((r) => ({ name: `rail "${r.id}"`, points: r.points }));
+  for (const p of pockets) {
+    if (p.lid) lines.push({ name: `the lid of pocket "${p.id}"`, points: p.lid });
+    for (const wing of [...(p.wings?.closed ?? []), ...(p.wings?.open ?? [])]) {
+      lines.push({ name: `a wing of pocket "${p.id}"`, points: wing });
+    }
+  }
+  return lines;
+}
+
+function segmentDistanceM(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** Why a nail at `p` would cut through one of `lines`, or null if it is clear of all of them. */
+function nailLineProblem(p: Vec2, lines: readonly NamedLine[]): string | null {
+  for (const line of lines) {
+    for (let k = 1; k < line.points.length; k++) {
+      const a = line.points[k - 1] as Vec2;
+      const b = line.points[k] as Vec2;
+      if (segmentDistanceM(p, a, b) < NAIL_RADIUS_M) return `overlaps ${line.name}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Why nail `index` can't move to `to`, or null if it can: the same rules
+ * parseBoard applies to a nail (a finite point on the board, clear of the
+ * other nails and of every rail, lid and wing) plus the one it checks on
+ * the assembled world, that a ball at the launch point stays clear of it.
+ * Everything else on the board is unchanged, so this is enough for the
+ * moved board to be valid. For M7's nail adjustment.
+ */
+export function nailMoveProblem(board: Board, index: number, to: Vec2): string | null {
+  if (!(Number.isInteger(index) && index >= 0 && index < board.nails.length)) {
+    return `no nail ${index}; the board has ${board.nails.length}`;
+  }
+  if (!(Number.isFinite(to.x) && Number.isFinite(to.y))) return 'must be a finite point';
+  if (!(to.x >= 0 && to.x <= board.widthM && to.y >= 0 && to.y <= board.heightM)) {
+    return `${fmt(to)} is outside the ${board.widthM} × ${board.heightM} m board`;
+  }
+  for (let j = 0; j < board.nails.length; j++) {
+    const other = board.nails[j] as Vec2;
+    if (j !== index && Math.hypot(to.x - other.x, to.y - other.y) < 2 * NAIL_RADIUS_M) {
+      return `${fmt(to)} overlaps nails[${j}] at ${fmt(other)}`;
+    }
+  }
+  const line = nailLineProblem(to, solidLines(board.rails, board.pockets));
+  if (line) return `${fmt(to)} ${line}`;
+  const { launcher } = board;
+  // The same clearance addBall checks a launched ball against.
+  const launchReachM = BALL_RADIUS_M - CONTACT_SLOP_M + NAIL_RADIUS_M;
+  if (Math.hypot(to.x - launcher.x, to.y - launcher.y) < launchReachM) {
+    return `${fmt(to)} blocks the launch point ${fmt(launcher)}`;
+  }
+  return null;
+}
+
+/**
+ * The board with nail `index` moved to `to`. Throws a BoardError, naming
+ * the nail, if nailMoveProblem finds one. The board passed in is unchanged.
+ */
+export function moveNail(board: Board, index: number, to: Vec2): Board {
+  const problem = nailMoveProblem(board, index, to);
+  if (problem) throw new BoardError([`nails[${index}]: ${problem}`]);
+  const nails = [...board.nails];
+  nails[index] = { x: to.x, y: to.y };
+  return { ...board, nails };
 }
 
 /**

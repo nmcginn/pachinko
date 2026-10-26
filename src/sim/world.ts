@@ -27,6 +27,7 @@ import {
   type Material,
   type SegmentShape,
   CONTACT_SLOP_M,
+  createCircle,
   createHit,
   moveOutOfReach,
   resolveBallContact,
@@ -176,6 +177,7 @@ export interface World {
   steps: number;
   /** Balls in play, in the order they were added. */
   readonly balls: Ball[];
+  /** Read them; move one only through moveCircle. */
   readonly circles: readonly CircleShape[];
   readonly segments: readonly SegmentShape[];
   readonly sensors: readonly SensorShape[];
@@ -198,8 +200,11 @@ export interface World {
    * (M6's rattle), never by the physics.
    */
   impactSpeedMps: number;
-  /** Spatial hash over circles and segments, or null to test every shape (and every pair of balls). */
-  readonly grid: StaticGrid | null;
+  /**
+   * Spatial hash over circles and segments, or null to test every shape (and
+   * every pair of balls). Rebuilt by moveCircle; otherwise fixed.
+   */
+  grid: StaticGrid | null;
   /** Balls collide with each other. */
   readonly ballCollisions: boolean;
   /** Id the next added ball will get. Ids are never reused. */
@@ -214,7 +219,8 @@ export function createWorld(options: WorldOptions = {}): World {
       throw new RangeError('world bounds must be finite with min < max');
     }
   }
-  const circles = options.circles ?? [];
+  // A copy: moveCircle replaces shapes in it.
+  const circles = [...(options.circles ?? [])];
   const segments = [...(options.segments ?? [])];
   const sensors = options.sensors ?? [];
   const gates: Gate[] = [];
@@ -289,6 +295,32 @@ export function addBall(
   world.nextBallId += 1;
   world.balls.push(ball);
   return ball;
+}
+
+/**
+ * Move circle `index` (a nail) to (x, y), keeping its radius and material,
+ * and rebuild the grid. For M7's nail adjustment, between steps: the step
+ * itself never moves geometry. Throws, changing nothing, if the index or
+ * position is invalid, or if the circle would overlap a ball in play, since
+ * the sim never pushes a ball out of a shape. A ball left touching it, or
+ * left clear of it, is fine: both are states the step handles.
+ */
+export function moveCircle(world: World, index: number, x: number, y: number): void {
+  const old = world.circles[index];
+  if (!Number.isInteger(index) || !old) {
+    throw new RangeError(`no circle ${index}; the world has ${world.circles.length}`);
+  }
+  const moved = createCircle({ x, y }, old.radiusM, old.material);
+  const reachM = BALL_CLEARANCE_M + moved.radiusM;
+  for (const b of world.balls) {
+    if (Math.hypot(b.x - x, b.y - y) < reachM) {
+      throw new RangeError(`circle ${index} at (${x}, ${y}) would overlap ball (id ${b.id})`);
+    }
+  }
+  (world.circles as CircleShape[])[index] = moved;
+  if (world.grid) {
+    world.grid = createStaticGrid(world.circles, world.segments, BALL_RADIUS_M + GRID_REACH_SLOP_M);
+  }
 }
 
 /** Remove a ball by id. Returns whether it was in play. */
