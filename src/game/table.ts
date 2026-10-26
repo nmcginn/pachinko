@@ -25,7 +25,8 @@ import {
 import { enterTulip } from './tulip';
 
 export interface Table {
-  readonly board: Board;
+  /** Replaced, never mutated, when a nail is adjusted (game/adjust.ts). */
+  board: Board;
   readonly world: World;
   readonly economy: Economy;
   readonly fire: FireControl;
