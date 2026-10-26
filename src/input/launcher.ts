@@ -68,9 +68,19 @@ export function createHolds(fire: FireControl): Holds {
 const INCREASE = new Set(['ArrowUp', 'ArrowRight']);
 const DECREASE = new Set(['ArrowDown', 'ArrowLeft']);
 
-/** Arrow keys and space, on the whole window. Returns an unbind function. */
-export function bindKeyboard(target: Window, fire: FireControl, holds: Holds): () => void {
+/**
+ * Arrow keys and space, on the whole window, while `active()` (not while
+ * the nails are being adjusted, M7: the arrows nudge a nail then). Returns
+ * an unbind function.
+ */
+export function bindKeyboard(
+  target: Window,
+  fire: FireControl,
+  holds: Holds,
+  active: () => boolean = () => true,
+): () => void {
   const down = (e: KeyboardEvent): void => {
+    if (!active()) return;
     if (e.code === 'Space') {
       holds.set('key', true);
       e.preventDefault();
@@ -97,8 +107,16 @@ export function bindKeyboard(target: Window, fire: FireControl, holds: Holds): (
   };
 }
 
-/** Pointer (mouse, touch, pen) on the dial element. Returns an unbind function. */
-export function bindDial(dial: HTMLElement, fire: FireControl, holds: Holds): () => void {
+/**
+ * Pointer (mouse, touch, pen) on the dial element. A press while
+ * `active()` is false is ignored. Returns an unbind function.
+ */
+export function bindDial(
+  dial: HTMLElement,
+  fire: FireControl,
+  holds: Holds,
+  active: () => boolean = () => true,
+): () => void {
   let pointer: number | null = null;
 
   const aim = (e: PointerEvent): void => {
@@ -110,7 +128,7 @@ export function bindDial(dial: HTMLElement, fire: FireControl, holds: Holds): ()
     setPower(fire, dialAngleToPower(pointerAngleDeg(dx, dy)));
   };
   const press = (e: PointerEvent): void => {
-    if (pointer !== null) return;
+    if (pointer !== null || !active()) return;
     pointer = e.pointerId;
     dial.setPointerCapture(e.pointerId);
     holds.set('dial', true);

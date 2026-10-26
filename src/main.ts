@@ -8,15 +8,18 @@ import './style.css';
 import classicBoard from '../boards/classic.json';
 import { collectCues, createCueTracker, drainCues } from './audio/cues';
 import { bindUnlock, createSound } from './audio/sound';
+import { createAdjust } from './game/adjust';
 import { createTable, stepTable } from './game/table';
 import { createHaptics } from './haptics/haptics';
+import { bindAdjust } from './input/adjust';
 import { bindDebugKeys } from './input/debug';
 import { bindDial, bindKeyboard, createHolds } from './input/launcher';
 import { bindMute, loadMuted } from './input/mute';
 import { bindVibration, hapticsSupported, loadVibration } from './input/vibration';
 import { bindVisibility, createClock, createLoop } from './loop';
+import { createAdjustPanel, drawAdjust } from './render/adjust';
 import { drawBalls } from './render/balls';
-import { drawBoard, drawGlints } from './render/board';
+import { type BoardView, drawBoard, drawGlints } from './render/board';
 import { attachCanvas } from './render/canvas';
 import { createFlash } from './render/celebration';
 import { createDebugOverlay } from './render/debug';
@@ -86,9 +89,40 @@ const table = createTable(parseBoard(classicBoard), {
   keepInPlay: pickInPlay(),
 });
 
+// Nail adjustment (M7). While editing, the table isn't stepped, and the
+// handle's keys and dial do nothing: the arrows nudge the selected nail.
+const adjust = createAdjust(table);
+const playing = () => !adjust.editing;
+const adjustPanel = createAdjustPanel({
+  toggle: byId('adjust', HTMLButtonElement),
+  panel: byId('adjust-panel', HTMLElement),
+  selection: byId('adjust-selection', HTMLElement),
+  problem: byId('adjust-problem', HTMLElement),
+  root: document.body,
+});
+/** The board's mapping to the canvas in the latest frame, for picking nails. */
+let boardView: BoardView | null = null;
+bindAdjust(
+  window,
+  {
+    toggle: byId('adjust', HTMLButtonElement),
+    canvas,
+    left: byId('nudge-left', HTMLButtonElement),
+    right: byId('nudge-right', HTMLButtonElement),
+    up: byId('nudge-up', HTMLButtonElement),
+    down: byId('nudge-down', HTMLButtonElement),
+    reset: byId('nudge-reset', HTMLButtonElement),
+  },
+  adjust,
+  table,
+  () => boardView,
+  () => adjustPanel.update(adjust, table.board),
+);
+adjustPanel.update(adjust, table.board);
+
 const holds = createHolds(table.fire);
-bindKeyboard(window, table.fire, holds);
-bindDial(byId('handle', HTMLElement), table.fire, holds);
+bindKeyboard(window, table.fire, holds, playing);
+bindDial(byId('handle', HTMLElement), table.fire, holds, playing);
 bindDebugKeys(window, table.machine);
 
 // Sound starts on the first interaction, never before (bindUnlock).
@@ -131,6 +165,9 @@ const loop = createLoop(
   createClock(SIM_STEP_S, MAX_FRAME_S),
   {
     step: () => {
+      // Paused while adjusting nails: the clock runs on, so nothing piles
+      // up to catch up on afterwards.
+      if (adjust.editing) return;
       stepTable(table);
       collectCues(cues, table);
       collectGlints(glints, table.world);
@@ -140,11 +177,14 @@ const loop = createLoop(
       sound.play(frameCues);
       haptics?.play(frameCues);
       const bv = drawBoard(view, table.board, table.world.gates, REEL_BAND_PX);
+      boardView = bv;
       const glinting = drawGlints(view, bv, table.board, glints, table.world.steps);
       // For tests: nails glinting in this frame. Only written when it changes.
       if (canvas.dataset['glints'] !== String(glinting))
         canvas.dataset['glints'] = String(glinting);
-      drawBalls(view, bv, table.world.balls, frame.alpha);
+      // Paused balls are drawn where they are, not part-way through a step.
+      drawBalls(view, bv, table.world.balls, adjust.editing ? 1 : frame.alpha);
+      drawAdjust(view, bv, table.board, adjust);
       hud.update(table.economy, table.fire, table.world.balls.length);
       reel.update(table.machine);
       flash.update(table.machine);

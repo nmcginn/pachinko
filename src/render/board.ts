@@ -48,6 +48,11 @@ export interface BoardView {
   readonly oy: number;
 }
 
+/** The board point, in metres, under a canvas point in CSS pixels: the inverse of the view. */
+export function boardPointM(bv: BoardView, xPx: number, yPx: number): { x: number; y: number } {
+  return { x: (xPx - bv.ox) / bv.scale, y: (bv.oy - yPx) / bv.scale };
+}
+
 /**
  * Largest scale that fits the whole board in the canvas with a margin,
  * centred in what is left below a band of `topPx` (the reel panel's).

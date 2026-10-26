@@ -14,6 +14,7 @@ import {
   SIM_STEP_S,
   addBall,
   ballEnergyJ,
+  moveCircle,
   createWorld,
   removeBall,
   stepWorld,
@@ -322,5 +323,86 @@ describe('impact speed (M6 rattle)', () => {
     addBall(world, { x: 0, y: contactY + 0.0002, vy: -0.5 });
     addBall(world, { x: 0.1, y: contactY + 0.0008, vy: -2 });
     expect(firstImpact(world, 1)).toBeCloseTo(2, 2);
+  });
+});
+
+describe('moving a nail (moveCircle, M7)', () => {
+  const nailWorld = (broadphase = true) =>
+    createWorld({
+      circles: [
+        createCircle({ x: 0, y: 0 }, NAIL_RADIUS_M, NAIL_MATERIAL),
+        createCircle({ x: 0.1, y: 0 }, NAIL_RADIUS_M, NAIL_MATERIAL),
+      ],
+      broadphase,
+    });
+  /** Drop a ball from 50 mm above (x, 0) for 0.15 s; whether anything turned it sideways. */
+  const deflected = (world: ReturnType<typeof createWorld>, x: number) => {
+    const ball = addBall(world, { x, y: 0.05 });
+    for (let i = 0; i < steps(0.15); i++) stepWorld(world);
+    removeBall(world, ball.id);
+    return ball.vx !== 0;
+  };
+
+  it('moves the nail for the step: balls hit it where it is now, not where it was', () => {
+    for (const broadphase of [true, false]) {
+      const world = nailWorld(broadphase);
+      expect(deflected(world, 0.0005)).toBe(true);
+      // 40 mm to the right: outside the grid cells it was indexed in.
+      moveCircle(world, 0, 0.04, 0);
+      expect(world.circles[0]).toMatchObject({ x: 0.04, y: 0, radiusM: NAIL_RADIUS_M });
+      expect(world.circles[0]?.material).toBe(NAIL_MATERIAL);
+      expect(deflected(world, 0.0005)).toBe(false);
+      expect(deflected(world, 0.0405)).toBe(true);
+      // The other nail is untouched.
+      expect(world.circles[1]).toMatchObject({ x: 0.1, y: 0 });
+      expect(deflected(world, 0.1005)).toBe(true);
+    }
+  });
+
+  it('gives the same trajectories with and without the grid after a move', () => {
+    const run = (broadphase: boolean) => {
+      const world = nailWorld(broadphase);
+      moveCircle(world, 1, 0.0123, -0.0004);
+      const ball = addBall(world, { x: 0.0125, y: 0.05, vx: 0.01 });
+      const path: number[] = [];
+      for (let i = 0; i < steps(0.2); i++) {
+        stepWorld(world);
+        path.push(ball.x, ball.y);
+      }
+      return path;
+    };
+    expect(run(true)).toEqual(run(false));
+  });
+
+  it('refuses to move a nail into a ball in play, and changes nothing', () => {
+    const world = nailWorld();
+    const ball = addBall(world, { x: 0.05, y: 0 });
+    const gridBefore = world.grid;
+    const touchM = BALL_RADIUS_M + NAIL_RADIUS_M;
+    expect(() => moveCircle(world, 0, 0.05 - touchM + 1e-6, 0)).toThrow(
+      `would overlap ball (id ${ball.id})`,
+    );
+    expect(world.circles[0]).toMatchObject({ x: 0, y: 0 });
+    expect(world.grid).toBe(gridBefore);
+    // Touching is allowed: a ball against a nail is a state the step handles.
+    moveCircle(world, 0, 0.05 - touchM, 0);
+    expect(world.circles[0]?.x).toBe(0.05 - touchM);
+  });
+
+  it('refuses a circle that does not exist and a position that is not finite', () => {
+    const world = nailWorld();
+    expect(() => moveCircle(world, 2, 0, 0)).toThrow('no circle 2');
+    expect(() => moveCircle(world, -1, 0, 0)).toThrow('no circle -1');
+    expect(() => moveCircle(world, 0.5, 0, 0)).toThrow('no circle 0.5');
+    expect(() => moveCircle(createWorld(), 0, 0, 0)).toThrow('no circle 0; the world has 0');
+    expect(() => moveCircle(world, 0, NaN, 0)).toThrow('finite');
+    expect(world.circles[0]).toMatchObject({ x: 0, y: 0 });
+  });
+
+  it('never changes the array of circles the world was created from', () => {
+    const circles = [createCircle({ x: 0, y: 0 }, NAIL_RADIUS_M, NAIL_MATERIAL)];
+    const world = createWorld({ circles });
+    moveCircle(world, 0, 0.01, 0);
+    expect(circles[0]).toMatchObject({ x: 0, y: 0 });
   });
 });
