@@ -82,15 +82,13 @@ describe('nail adjustment', () => {
     expect(nudgeSelected(adjust, table, 1, 0)).toBe(true);
     expect(table.board).not.toBe(before);
     expect(before.nails[RIGHT]).toEqual({ x: 0.2573, y: 0.178 });
-    expect(table.board.nails[RIGHT]).toEqual({ x: 0.2573 + NAIL_STEP_M, y: 0.178 });
+    expect(table.board.nails[RIGHT]).toEqual({ x: 0.2574, y: 0.178 });
     expectInSync(table);
     expect(selectedOffset(adjust)).toEqual({ dx: 1, dy: 0 });
     // Up and left, a few at once.
     expect(nudgeSelected(adjust, table, -3, 2)).toBe(true);
-    expect(table.board.nails[RIGHT]).toEqual({
-      x: 0.2573 - 2 * NAIL_STEP_M,
-      y: 0.178 + 2 * NAIL_STEP_M,
-    });
+    // To the nanometre: the decimals they look like, not 0.2573 − 0.0002 in floating point.
+    expect(table.board.nails[RIGHT]).toEqual({ x: 0.2571, y: 0.1782 });
     expect(selectedOffset(adjust)).toEqual({ dx: -2, dy: 2 });
     expectInSync(table);
     // Only that nail moved.
@@ -146,11 +144,13 @@ describe('nail adjustment', () => {
   it('refuses a nudge into another nail, says why, changes nothing, then takes a good one', () => {
     const table = createTable(classic);
     const adjust = selected(table, LEFT);
-    // The start nails are 14.5 mm apart, centre to centre; they touch at 2 mm.
-    const gapSteps = Math.round((0.2573 - 0.2428 - 2 * NAIL_RADIUS_M) / NAIL_STEP_M);
+    // The start nails are 14.5 mm apart, centre to centre, so they'd touch
+    // after 12.5 mm. Exactly touching is a floating-point coin toss; 0.1 mm
+    // short of it is clear, and 0.1 mm past it overlaps.
+    const gapSteps = Math.round((0.2573 - 0.2428 - 2 * NAIL_RADIUS_M) / NAIL_STEP_M) - 1;
     expect(nudgeSelected(adjust, table, gapSteps, 0)).toBe(true);
     const board = table.board;
-    expect(nudgeSelected(adjust, table, 1, 0)).toBe(false);
+    expect(nudgeSelected(adjust, table, 2, 0)).toBe(false);
     expect(adjust.problem).toMatch(
       /^Nail 0 can't go there: \(.*\) overlaps nails\[1\] at \(0.2573, 0.178\)$/,
     );

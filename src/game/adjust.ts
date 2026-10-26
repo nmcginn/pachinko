@@ -114,10 +114,20 @@ export function resetSelected(adjust: Adjust, table: Table): boolean {
   return placeSelected(adjust, table, { dx: 0, dy: 0 });
 }
 
+/**
+ * `steps` nudges from `homeM`, rounded to the nanometre so a nudged nail's
+ * coordinates are the decimals they look like (0.2558, not
+ * 0.25580000000000003) in the board data and in messages. No steps is
+ * home exactly.
+ */
+function stepFrom(homeM: number, steps: number): number {
+  return steps === 0 ? homeM : Math.round((homeM + steps * NAIL_STEP_M) * 1e9) / 1e9;
+}
+
 function placeSelected(adjust: Adjust, table: Table, offset: NailOffset): boolean {
   const index = adjust.selected as number;
   const home = adjust.original[index] as Vec2;
-  const to = { x: home.x + offset.dx * NAIL_STEP_M, y: home.y + offset.dy * NAIL_STEP_M };
+  const to = { x: stepFrom(home.x, offset.dx), y: stepFrom(home.y, offset.dy) };
   const problem = nailMoveProblem(table.board, index, to);
   if (problem) {
     adjust.problem = `Nail ${index} can't go there: ${problem}`;
