@@ -1,6 +1,7 @@
-// Nail adjustment (M7): select a nail and nudge it in 0.1 mm steps, as a
-// hall's nail man (釘師) would with a hammer. Pure: the input layer turns
-// clicks and keys into these calls, and the renderer reads the state.
+// Nail adjustment (M7): select a nail and nudge it in 0.1 mm steps, or
+// bend it in 0.5° steps, as a hall's nail man (釘師) would with a hammer.
+// Pure: the input layer turns clicks and keys into these calls, and the
+// renderer reads the state.
 //
 // The machine is stopped while its nails are being adjusted: main.ts
 // doesn't step the table while `editing` is set, so balls in play wait
@@ -9,14 +10,36 @@
 //
 // A nail's position is kept as whole steps from where the board loaded it,
 // so nudging back and forth returns it exactly, with no rounding drift.
+//
+// Bending (the maintainer's option (a), PLAN.md "Resolved") leans the nail
+// about its root. The ball meets a nail about one ball radius above the
+// backboard, so a lean of θ moves the point the sim sees by
+// BEND_HEIGHT_M × tan θ that way; the board stores only that position, as
+// for a nudge. Leans are kept in whole steps too, per axis: a nail leant
+// right and up moves right by h·tan θx and up by h·tan θy. A nail's
+// position is its loaded one plus its nudges plus its lean's shift.
 
 import { moveNail, nailMoveProblem } from '../sim/board';
 import type { Vec2 } from '../sim/vec';
-import { moveCircle } from '../sim/world';
+import { BALL_RADIUS_M, moveCircle } from '../sim/world';
 import type { Table } from './table';
 
 /** One nudge: 0.1 mm (PLAN.md M7). */
 export const NAIL_STEP_M = 0.0001;
+
+/** One bend: 0.5° (PLAN.md M7). */
+export const BEND_STEP_DEG = 0.5;
+/** Where the ball meets a nail, above the backboard: one ball radius (5.5 mm). */
+export const BEND_HEIGHT_M = BALL_RADIUS_M;
+/**
+ * Most a nail leans either way on each axis, in steps: 15°, moving it
+ * 1.47 mm. The model is a small-angle one: it takes the ball to meet the
+ * nail at a fixed height whatever the lean, which stops being true once
+ * the shank leans far enough to meet the ball first. 15° is well past
+ * anything a nail man does (a degree or two) and keeps tan θ within 2.4%
+ * of θ. Not a physics constant: a limit on the editor.
+ */
+export const MAX_LEAN_STEPS = 30;
 
 export interface NailOffset {
   /** Steps of NAIL_STEP_M from the loaded position, x right, y up. */
@@ -24,15 +47,28 @@ export interface NailOffset {
   readonly dy: number;
 }
 
+export interface NailLean {
+  /** Steps of BEND_STEP_DEG the head leans, x right, y up (toward the top of the board). */
+  readonly lx: number;
+  readonly ly: number;
+}
+
+/** What the arrows do in edit mode: nudge the selected nail, or bend it. */
+export type AdjustMode = 'nudge' | 'bend';
+
 export interface Adjust {
   /** Edit mode is on. The table isn't stepped while it is. */
   editing: boolean;
+  /** Whether the arrows nudge or bend. Kept when edit mode is left. */
+  mode: AdjustMode;
   /** Index into the board's nails (and the world's circles), or null for none. */
   selected: number | null;
   /** The nails as the board loaded them. Offsets count from these. */
   readonly original: readonly Vec2[];
   /** Per moved nail, its offset in steps. A nail back where it started has no entry. */
   readonly offsets: Map<number, NailOffset>;
+  /** Per bent nail, its lean in steps. An upright nail has no entry. */
+  readonly leans: Map<number, NailLean>;
   /** Why the latest move was refused, or null. Cleared by the next call that changes anything. */
   problem: string | null;
 }
@@ -40,9 +76,11 @@ export interface Adjust {
 export function createAdjust(table: Table): Adjust {
   return {
     editing: false,
+    mode: 'nudge',
     selected: null,
     original: table.board.nails.map((n) => ({ x: n.x, y: n.y })),
     offsets: new Map(),
+    leans: new Map(),
     problem: null,
   };
 }
@@ -51,6 +89,17 @@ export function createAdjust(table: Table): Adjust {
 export function setEditing(adjust: Adjust, editing: boolean): void {
   adjust.editing = editing;
   adjust.problem = null;
+}
+
+/** Switch the arrows between nudging and bending. Clears any refusal. */
+export function setMode(adjust: Adjust, mode: AdjustMode): void {
+  adjust.mode = mode;
+  adjust.problem = null;
+}
+
+/** Every nail nudged or bent away from where the board loaded it, in index order. */
+export function movedNails(adjust: Adjust): number[] {
+  return [...new Set([...adjust.offsets.keys(), ...adjust.leans.keys()])].sort((a, b) => a - b);
 }
 
 /**
@@ -85,6 +134,17 @@ export function selectedOffset(adjust: Adjust): NailOffset | null {
   return adjust.offsets.get(adjust.selected) ?? { dx: 0, dy: 0 };
 }
 
+/** The selected nail's lean in steps: zero if it is upright, null with no selection. */
+export function selectedLean(adjust: Adjust): NailLean | null {
+  if (adjust.selected === null) return null;
+  return adjust.leans.get(adjust.selected) ?? { lx: 0, ly: 0 };
+}
+
+/** How far a lean of `steps` moves a nail along that axis, in metres: BEND_HEIGHT_M × tan θ. */
+export function leanShiftM(steps: number): number {
+  return BEND_HEIGHT_M * Math.tan((steps * BEND_STEP_DEG * Math.PI) / 180);
+}
+
 /**
  * Move the selected nail by (dx, dy) whole steps of NAIL_STEP_M. Refused,
  * with the reason in `problem` and nothing changed, if no nail is selected,
@@ -102,32 +162,65 @@ export function nudgeSelected(adjust: Adjust, table: Table, dx: number, dy: numb
     adjust.problem = `Nudges are whole steps, got (${dx}, ${dy})`;
     return false;
   }
-  return placeSelected(adjust, table, { dx: offset.dx + dx, dy: offset.dy + dy });
+  const lean = selectedLean(adjust) as NailLean;
+  return placeSelected(adjust, table, { dx: offset.dx + dx, dy: offset.dy + dy }, lean);
 }
 
-/** Put the selected nail back where the board loaded it. Refused like a nudge if it can't go there now. */
+/**
+ * Lean the selected nail's head by (lx, ly) more whole steps of
+ * BEND_STEP_DEG, x right and y up. Refused like a nudge, and also if the
+ * lean would pass MAX_LEAN_STEPS either way on either axis. Returns
+ * whether it moved.
+ */
+export function leanSelected(adjust: Adjust, table: Table, lx: number, ly: number): boolean {
+  const lean = selectedLean(adjust);
+  const offset = selectedOffset(adjust);
+  if (lean === null || offset === null) {
+    adjust.problem = 'Select a nail first';
+    return false;
+  }
+  if (!(Number.isInteger(lx) && Number.isInteger(ly))) {
+    adjust.problem = `Bends are whole steps, got (${lx}, ${ly})`;
+    return false;
+  }
+  const to = { lx: lean.lx + lx, ly: lean.ly + ly };
+  if (Math.abs(to.lx) > MAX_LEAN_STEPS || Math.abs(to.ly) > MAX_LEAN_STEPS) {
+    adjust.problem = `Nails lean at most ${MAX_LEAN_STEPS * BEND_STEP_DEG}° each way`;
+    return false;
+  }
+  return placeSelected(adjust, table, offset, to);
+}
+
+/**
+ * Put the selected nail back where the board loaded it, unnudged and
+ * upright. Refused like a nudge if it can't go there now.
+ */
 export function resetSelected(adjust: Adjust, table: Table): boolean {
   if (adjust.selected === null) {
     adjust.problem = 'Select a nail first';
     return false;
   }
-  return placeSelected(adjust, table, { dx: 0, dy: 0 });
+  return placeSelected(adjust, table, { dx: 0, dy: 0 }, { lx: 0, ly: 0 });
 }
 
 /**
- * `steps` nudges from `homeM`, rounded to the nanometre so a nudged nail's
- * coordinates are the decimals they look like (0.2558, not
- * 0.25580000000000003) in the board data and in messages. No steps is
- * home exactly.
+ * `steps` nudges and `leanSteps` of lean from `homeM`, rounded to the
+ * nanometre so a moved nail's coordinates are the decimals they look like
+ * (0.2558, not 0.25580000000000003) in the board data and in messages.
+ * No steps of either is home exactly.
  */
-function stepFrom(homeM: number, steps: number): number {
-  return steps === 0 ? homeM : Math.round((homeM + steps * NAIL_STEP_M) * 1e9) / 1e9;
+function stepFrom(homeM: number, steps: number, leanSteps: number): number {
+  if (steps === 0 && leanSteps === 0) return homeM;
+  return Math.round((homeM + steps * NAIL_STEP_M + leanShiftM(leanSteps)) * 1e9) / 1e9;
 }
 
-function placeSelected(adjust: Adjust, table: Table, offset: NailOffset): boolean {
+function placeSelected(adjust: Adjust, table: Table, offset: NailOffset, lean: NailLean): boolean {
   const index = adjust.selected as number;
   const home = adjust.original[index] as Vec2;
-  const to = { x: stepFrom(home.x, offset.dx), y: stepFrom(home.y, offset.dy) };
+  const to = {
+    x: stepFrom(home.x, offset.dx, lean.lx),
+    y: stepFrom(home.y, offset.dy, lean.ly),
+  };
   const problem = nailMoveProblem(table.board, index, to);
   if (problem) {
     adjust.problem = `Nail ${index} can't go there: ${problem}`;
@@ -143,6 +236,8 @@ function placeSelected(adjust: Adjust, table: Table, offset: NailOffset): boolea
   table.board = moveNail(table.board, index, to);
   if (offset.dx === 0 && offset.dy === 0) adjust.offsets.delete(index);
   else adjust.offsets.set(index, offset);
+  if (lean.lx === 0 && lean.ly === 0) adjust.leans.delete(index);
+  else adjust.leans.set(index, lean);
   adjust.problem = null;
   return true;
 }
