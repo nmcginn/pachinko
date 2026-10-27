@@ -90,7 +90,7 @@ const table = createTable(parseBoard(classicBoard), {
 });
 
 // Nail adjustment (M7). While editing, the table isn't stepped, and the
-// handle's keys and dial do nothing: the arrows nudge the selected nail.
+// handle's keys and dial do nothing: the arrows nudge or bend the selected nail.
 const adjust = createAdjust(table);
 const playing = () => !adjust.editing;
 const adjustPanel = createAdjustPanel({
@@ -99,6 +99,14 @@ const adjustPanel = createAdjustPanel({
   selection: byId('adjust-selection', HTMLElement),
   problem: byId('adjust-problem', HTMLElement),
   root: document.body,
+  nudgeMode: byId('mode-nudge', HTMLButtonElement),
+  bendMode: byId('mode-bend', HTMLButtonElement),
+  arrows: {
+    left: byId('nudge-left', HTMLButtonElement),
+    right: byId('nudge-right', HTMLButtonElement),
+    up: byId('nudge-up', HTMLButtonElement),
+    down: byId('nudge-down', HTMLButtonElement),
+  },
 });
 /** The board's mapping to the canvas in the latest frame, for picking nails. */
 let boardView: BoardView | null = null;
@@ -112,6 +120,8 @@ bindAdjust(
     up: byId('nudge-up', HTMLButtonElement),
     down: byId('nudge-down', HTMLButtonElement),
     reset: byId('nudge-reset', HTMLButtonElement),
+    nudgeMode: byId('mode-nudge', HTMLButtonElement),
+    bendMode: byId('mode-bend', HTMLButtonElement),
   },
   adjust,
   table,

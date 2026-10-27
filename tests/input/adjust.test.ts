@@ -1,12 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { NAIL_STEP_M, createAdjust } from '../../src/game/adjust';
+import { BEND_STEP_DEG, NAIL_STEP_M, createAdjust } from '../../src/game/adjust';
 import { createTable } from '../../src/game/table';
 import {
   ADJUST_CODE,
+  BIG_LEAN_STEPS,
   BIG_NUDGE_STEPS,
+  MODE_CODE,
   PICK_REACH_PX,
   adjustKeyAction,
+  arrowSteps,
   bindAdjust,
 } from '../../src/input/adjust';
 import { type BoardView, fitBoard } from '../../src/render/board';
@@ -39,24 +42,51 @@ describe('adjustKeyAction', () => {
     expect(adjustKeyAction(key({ code: 'KeyE', altKey: true }), false)).toBeNull();
   });
 
-  it('in edit mode, arrows nudge one step (ten with Shift), repeating, and Escape leaves', () => {
+  it('in edit mode, arrows move one way, repeating, big with Shift, and Escape leaves', () => {
     expect(adjustKeyAction(key({ key: 'ArrowLeft' }), true)).toEqual({
-      kind: 'nudge',
+      kind: 'arrow',
       dx: -1,
       dy: 0,
+      big: false,
+    });
+    expect(adjustKeyAction(key({ key: 'ArrowRight' }), true)).toEqual({
+      kind: 'arrow',
+      dx: 1,
+      dy: 0,
+      big: false,
     });
     expect(adjustKeyAction(key({ key: 'ArrowUp', repeat: true }), true)).toEqual({
-      kind: 'nudge',
+      kind: 'arrow',
       dx: 0,
       dy: 1,
+      big: false,
     });
     expect(adjustKeyAction(key({ key: 'ArrowDown', shiftKey: true }), true)).toEqual({
-      kind: 'nudge',
+      kind: 'arrow',
       dx: 0,
-      dy: -BIG_NUDGE_STEPS,
+      dy: -1,
+      big: true,
     });
-    expect(BIG_NUDGE_STEPS * NAIL_STEP_M).toBeCloseTo(0.001, 15);
     expect(adjustKeyAction(key({ key: 'Escape' }), true)).toEqual({ kind: 'leave' });
+  });
+
+  it('an arrow is one step, or with Shift 1 mm of nudge or 2.5° of bend', () => {
+    expect(arrowSteps('nudge', false)).toBe(1);
+    expect(arrowSteps('bend', false)).toBe(1);
+    expect(arrowSteps('nudge', true)).toBe(BIG_NUDGE_STEPS);
+    expect(arrowSteps('bend', true)).toBe(BIG_LEAN_STEPS);
+    expect(BIG_NUDGE_STEPS * NAIL_STEP_M).toBeCloseTo(0.001, 15);
+    expect(BIG_LEAN_STEPS * BEND_STEP_DEG).toBe(2.5);
+  });
+
+  it('B switches mode in edit mode only, not on repeat nor with Ctrl, Cmd or Alt', () => {
+    expect(MODE_CODE).toBe('KeyB');
+    expect(adjustKeyAction(key({ code: 'KeyB', key: 'b' }), true)).toEqual({ kind: 'mode' });
+    expect(adjustKeyAction(key({ code: 'KeyB', key: 'b' }), false)).toBeNull();
+    expect(adjustKeyAction(key({ code: 'KeyB', repeat: true }), true)).toBeNull();
+    expect(adjustKeyAction(key({ code: 'KeyB', ctrlKey: true }), true)).toBeNull();
+    expect(adjustKeyAction(key({ code: 'KeyB', metaKey: true }), true)).toBeNull();
+    expect(adjustKeyAction(key({ code: 'KeyB', altKey: true }), true)).toBeNull();
   });
 
   it('out of edit mode, arrows and Escape are left to the handle', () => {
@@ -85,6 +115,8 @@ describe('bindAdjust', () => {
       up: element(),
       down: element(),
       reset: element(),
+      nudgeMode: element(),
+      bendMode: element(),
     };
     let changes = 0;
     const unbind = bindAdjust(
@@ -158,7 +190,10 @@ describe('bindAdjust', () => {
     const canvas = element();
     const els = {
       ...Object.fromEntries(
-        ['toggle', 'left', 'right', 'up', 'down', 'reset'].map((k) => [k, element()]),
+        ['toggle', 'left', 'right', 'up', 'down', 'reset', 'nudgeMode', 'bendMode'].map((k) => [
+          k,
+          element(),
+        ]),
       ),
       canvas,
     } as unknown as Parameters<typeof bindAdjust>[1];
@@ -194,10 +229,47 @@ describe('bindAdjust', () => {
     expect(adjust.offsets.size).toBe(0);
   });
 
+  it('in bend mode, the arrow keys and buttons lean the nail instead; B and the buttons switch', () => {
+    const { table, adjust, els, press, click, tap, changes } = setup();
+    press({ code: 'KeyE' });
+    tap(0.2573, 0.178);
+    const e = press({ code: 'KeyB', key: 'b' });
+    expect(e.defaultPrevented).toBe(true);
+    expect(adjust.mode).toBe('bend');
+    press({ key: 'ArrowRight' });
+    press({ key: 'ArrowUp', shiftKey: true });
+    expect(adjust.leans.get(1)).toEqual({ lx: 1, ly: BIG_LEAN_STEPS });
+    expect(adjust.offsets.size).toBe(0);
+    click(els.left);
+    click(els.left);
+    click(els.down);
+    expect(adjust.leans.get(1)).toEqual({ lx: -1, ly: BIG_LEAN_STEPS - 1 });
+    // Back to nudging: the same keys now nudge, and the lean stays.
+    press({ code: 'KeyB', key: 'b' });
+    expect(adjust.mode).toBe('nudge');
+    press({ key: 'ArrowRight', shiftKey: true });
+    expect(adjust.offsets.get(1)).toEqual({ dx: BIG_NUDGE_STEPS, dy: 0 });
+    expect(adjust.leans.get(1)).toEqual({ lx: -1, ly: BIG_LEAN_STEPS - 1 });
+    // The buttons pick a mode outright.
+    click(els.bendMode);
+    click(els.bendMode);
+    expect(adjust.mode).toBe('bend');
+    click(els.nudgeMode);
+    expect(adjust.mode).toBe('nudge');
+    const before = changes();
+    click(els.reset);
+    expect(changes()).toBe(before + 1);
+    expect(table.board.nails[1]).toEqual({ x: 0.2573, y: 0.178 });
+    expect(adjust.leans.size).toBe(0);
+    expect(adjust.offsets.size).toBe(0);
+  });
+
   it('leaves the arrow keys alone out of edit mode, and stops after unbinding', () => {
     const { adjust, press, unbind } = setup();
     const e = press({ key: 'ArrowRight' });
     expect(e.defaultPrevented).toBe(false);
+    expect(press({ code: 'KeyB' }).defaultPrevented).toBe(false);
+    expect(adjust.mode).toBe('nudge');
     unbind();
     press({ code: 'KeyE' });
     expect(adjust.editing).toBe(false);

@@ -1,11 +1,19 @@
 // Nail adjustment (M7) on screen: on the canvas, an outline round the
 // playfield while editing, a ring on every moved nail, and on the selected
 // one a brighter ring with a line back to where it started; in the DOM, the
-// panel that says which nail is selected, where it is and how far it has
-// moved, or why the last move was refused. data-* attributes mirror the
-// numbers for tests.
+// panel that says which nail is selected, where it is, how far it has been
+// nudged and how far it leans, or why the last move was refused, and which
+// mode the arrows are in. data-* attributes mirror the numbers for tests.
 
-import { type Adjust, NAIL_STEP_M, selectedOffset } from '../game/adjust';
+import {
+  type Adjust,
+  type AdjustMode,
+  BEND_STEP_DEG,
+  NAIL_STEP_M,
+  movedNails,
+  selectedLean,
+  selectedOffset,
+} from '../game/adjust';
 import type { Board } from '../sim/board';
 import { NAIL_RADIUS_M } from '../sim/world';
 import type { BoardView } from './board';
@@ -32,7 +40,7 @@ export function drawAdjust(view: CanvasView, bv: BoardView, board: Board, adjust
 
   ctx.lineWidth = Math.max(1, r * 0.5);
   ctx.beginPath();
-  for (const i of adjust.offsets.keys()) {
+  for (const i of movedNails(adjust)) {
     const n = board.nails[i];
     if (!n || i === adjust.selected) continue;
     const ring = Math.max(4, r * MOVED_RING_RADII);
@@ -67,16 +75,36 @@ const mm = (m: number) => (m * 1000).toFixed(1);
 const offsetMm = (steps: number) =>
   `${steps > 0 ? '+' : steps < 0 ? '−' : ''}${mm(Math.abs(steps) * NAIL_STEP_M)}`;
 
+/** A lean on one axis in degrees, named by the way it leans; null for upright on that axis. */
+function leanDeg(steps: number, plus: string, minus: string): string | null {
+  if (steps === 0) return null;
+  return `${(Math.abs(steps) * BEND_STEP_DEG).toFixed(1)}° ${steps > 0 ? plus : minus}`;
+}
+
 /** What the panel says about the selection: pure, for tests. */
 export function describeSelection(adjust: Adjust, board: Board): string {
   const offset = selectedOffset(adjust);
+  const lean = selectedLean(adjust);
   const n = adjust.selected === null ? undefined : board.nails[adjust.selected];
-  if (!offset || !n) return 'Click or tap a nail to select it';
-  const moved =
-    offset.dx === 0 && offset.dy === 0
-      ? 'not moved'
-      : `moved ${offsetMm(offset.dx)}, ${offsetMm(offset.dy)} mm`;
-  return `Nail ${adjust.selected} at ${mm(n.x)}, ${mm(n.y)} mm, ${moved}`;
+  if (!offset || !lean || !n) return 'Click or tap a nail to select it';
+  const parts = [`Nail ${adjust.selected} at ${mm(n.x)}, ${mm(n.y)} mm`];
+  if (offset.dx !== 0 || offset.dy !== 0)
+    parts.push(`nudged ${offsetMm(offset.dx)}, ${offsetMm(offset.dy)} mm`);
+  const leans = [leanDeg(lean.lx, 'right', 'left'), leanDeg(lean.ly, 'up', 'down')].filter(
+    (l) => l !== null,
+  );
+  if (leans.length > 0) parts.push(`leaning ${leans.join(', ')}`);
+  if (parts.length === 1) parts.push('not moved');
+  return parts.join(', ');
+}
+
+const ARROW_NAMES = ['left', 'right', 'up', 'down'] as const;
+
+/** What an arrow button says it does, in a mode: "Nudge left 0.1 mm", "Lean up 0.5°". */
+export function arrowLabel(mode: AdjustMode, arrow: (typeof ARROW_NAMES)[number]): string {
+  return mode === 'nudge'
+    ? `Nudge ${arrow} ${mm(NAIL_STEP_M)} mm`
+    : `Lean ${arrow} ${BEND_STEP_DEG.toFixed(1)}°`;
 }
 
 export interface AdjustPanel {
@@ -90,6 +118,11 @@ export interface AdjustPanelElements {
   readonly problem: HTMLElement;
   /** Gets the `editing` class while editing, for the page's styles. */
   readonly root: HTMLElement;
+  /** The mode buttons: aria-pressed on the one in use. */
+  readonly nudgeMode: HTMLElement;
+  readonly bendMode: HTMLElement;
+  /** The arrow buttons, labelled for the mode. */
+  readonly arrows: Readonly<Record<(typeof ARROW_NAMES)[number], HTMLElement>>;
 }
 
 export function createAdjustPanel(els: AdjustPanelElements): AdjustPanel {
@@ -98,8 +131,10 @@ export function createAdjustPanel(els: AdjustPanelElements): AdjustPanel {
   return {
     update(adjust, board) {
       const offset = selectedOffset(adjust);
+      const lean = selectedLean(adjust);
+      const moved = movedNails(adjust).length;
       const selection = describeSelection(adjust, board);
-      const key = [adjust.editing, selection, adjust.problem, adjust.offsets.size].join('|');
+      const key = [adjust.editing, adjust.mode, selection, adjust.problem, moved].join('|');
       if (key === shown) return;
       shown = key;
       els.root.classList.toggle('editing', adjust.editing);
@@ -110,7 +145,16 @@ export function createAdjustPanel(els: AdjustPanelElements): AdjustPanel {
       els.problem.textContent = adjust.problem ?? '';
       els.panel.dataset['selected'] = adjust.selected === null ? '' : String(adjust.selected);
       els.panel.dataset['offset'] = offset ? `${offset.dx},${offset.dy}` : '';
-      els.panel.dataset['moved'] = String(adjust.offsets.size);
+      els.panel.dataset['lean'] = lean ? `${lean.lx},${lean.ly}` : '';
+      els.panel.dataset['moved'] = String(moved);
+      els.panel.dataset['mode'] = adjust.mode;
+      els.nudgeMode.setAttribute('aria-pressed', String(adjust.mode === 'nudge'));
+      els.bendMode.setAttribute('aria-pressed', String(adjust.mode === 'bend'));
+      for (const arrow of ARROW_NAMES) {
+        const label = arrowLabel(adjust.mode, arrow);
+        els.arrows[arrow].setAttribute('aria-label', label);
+        els.arrows[arrow].title = label;
+      }
     },
   };
 }
