@@ -204,12 +204,19 @@ The rattle (`src/audio/cues.ts`) needs to know how hard balls hit things, so eac
 
 Measured on the classic board at power 0.2, 60 s of auto-fire, steps with an impact: about 210 a second under 0.05 m/s (resting and rolling contacts, held against a rail or nail by gravity), 37 a second over 0.2 m/s, none over 2 m/s. So a rattle needs at least 0.2 m/s (`RATTLE_MIN_SPEED_MPS`), which keeps a ball rolling down a rail quiet, and sounds at most every 25 ms (`RATTLE_INTERVAL_S`), so 30 balls rattle at 40 a second rather than hundreds. Both are presentation knobs, not physics.
 
+### Bending a nail (M7)
+
+A real nail is a pin driven into the backboard and standing about 20 mm proud of it; a nail man (釘師) adjusts it by tapping its head, which leans it about its root. The sim's nails are circles in the board's plane, so a lean has to become a move. The ball (11 mm across) touches a nail's shank about one ball radius above the backboard, so a lean of θ shifts the point the ball meets by h·tan θ with h = 5.5 mm (`BEND_HEIGHT_M`, which is `BALL_RADIUS_M`): about 0.096 mm per degree. This is the maintainer's option (a) (PLAN.md "Resolved"), and the board stores only the resulting position, so nothing in the sim knows a nail is bent.
+
+The editor leans in 0.5° steps (`BEND_STEP_DEG`), on each axis separately: a nail leant right and up moves right by h·tan θx and up by h·tan θy. Each axis is capped at 15° (`MAX_LEAN_STEPS`, 1.47 mm). The cap is the model's, not a physics constant: the model assumes the ball meets the shank at the same height whatever the lean, which stops being true once the shank leans far enough to meet the ball lower down, and past 90° tan θ wraps round to the other side. At 15° tan θ is still within 2.4% of θ, and real adjustments are a degree or two. Headless check (`tests/game/adjust.test.ts`): both start nails leant 15° outward take the classic board from 21.88 to 33.25 spins per ¥1000 (2000 balls, power 0.2, seed 1), against 28.88 for a 1 mm nudge outward.
+
 ## Assumptions
 
 - The frame loop discards wall time beyond 0.1 s per frame instead of catching up. Sim time is therefore not wall time after a stall. Nothing depends on wall time: the reel's spin, the jackpot rounds' 30 s timeout, and the pause between rounds (M4) all count sim steps (`src/game/machine.ts`), so a stall pauses them along with the balls.
 - Ball spin is not modelled. Friction's effect on spin is approximated by the 2/7 cap and by frictionless rolling contact (see "Friction"). If ball behaviour on rails looks wrong in M2, spin is the first suspect.
 - A ball is never placed inside geometry: `addBall` refuses it, since nothing ever pushes a ball out of a shape.
 - Collision response treats nails and rails as fixed (infinite mass). Nails don't flex.
+- A bent nail is modelled as an upright nail moved by 5.5 mm × tan(lean): the ball is taken to meet it at the same height whatever the lean (see "Bending a nail").
 - A launched ball appears at the bottom of the lane already at launch speed. The hammer stroke isn't modelled.
 - Ball–ball contacts are frictionless, and balls have no spin (see "Ball against ball").
 - Launch speed varies by 1% from shot to shot; launch direction does not vary (see "Launch spread").

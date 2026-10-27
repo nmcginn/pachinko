@@ -338,6 +338,29 @@ body {
   display: none;
 }
 
+#adjust-modes {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+#adjust-modes button {
+  min-width: 88px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 15px;
+  color: inherit;
+  background: #1d2026;
+  border: 2px solid #5b5f66;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+#adjust-modes button[aria-pressed='true'] {
+  border-color: #6fd3ff;
+  color: #6fd3ff;
+}
+
 #adjust-buttons {
   display: flex;
   flex-wrap: wrap;

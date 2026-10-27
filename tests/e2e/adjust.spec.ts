@@ -1,6 +1,7 @@
 // M7: nail adjustment in the browser. Edit mode pauses play, a click
-// selects a nail, the arrow keys and the panel's buttons nudge it 0.1 mm,
-// and a move into another nail is refused with the reason.
+// selects a nail, the arrow keys and the panel's buttons nudge it 0.1 mm
+// or, in bend mode, lean it 0.5°, and a move into another nail is refused
+// with the reason.
 
 import { expect, test, type Page } from '@playwright/test';
 import { fitBoard } from '../../src/render/board';
@@ -56,7 +57,7 @@ test('E opens the panel; a click selects a nail; arrows and buttons nudge it 0.1
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
   await expect(panel(page)).toHaveAttribute('data-offset', '3,0');
   await expect(page.locator('#adjust-selection')).toHaveText(
-    'Nail 1 at 257.6, 178.0 mm, moved +0.3, 0.0 mm',
+    'Nail 1 at 257.6, 178.0 mm, nudged +0.3, 0.0 mm',
   );
   await page.keyboard.press('Shift+ArrowUp');
   await expect(panel(page)).toHaveAttribute('data-offset', '3,10');
@@ -74,6 +75,57 @@ test('E opens the panel; a click selects a nail; arrows and buttons nudge it 0.1
   await expect(page.locator('#handle')).toHaveAttribute('data-power', '0.500');
   await page.getByRole('button', { name: 'Done adjusting' }).click();
   await expect(panel(page)).toBeHidden();
+});
+
+test('bend mode: B or the Bend button, and the arrows lean the nail 0.5° a step', async ({
+  page,
+}) => {
+  await page.keyboard.press('e');
+  await expect(panel(page)).toHaveAttribute('data-mode', 'nudge');
+  await expect(page.locator('#mode-nudge')).toHaveAttribute('aria-pressed', 'true');
+  const left = START_NAILS[0];
+  await clickBoard(page, left.x, left.y);
+  await expect(panel(page)).toHaveAttribute('data-selected', '0');
+
+  await page.keyboard.press('b');
+  await expect(panel(page)).toHaveAttribute('data-mode', 'bend');
+  await expect(page.locator('#mode-bend')).toHaveAttribute('aria-pressed', 'true');
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowLeft');
+  await expect(panel(page)).toHaveAttribute('data-lean', '-3,0');
+  // 1.5° is 0.144 mm: 242.8 becomes 242.656, shown as 242.7.
+  await expect(page.locator('#adjust-selection')).toHaveText(
+    'Nail 0 at 242.7, 178.0 mm, leaning 1.5° left',
+  );
+  await page.keyboard.press('Shift+ArrowUp');
+  await expect(panel(page)).toHaveAttribute('data-lean', '-3,5');
+  await page.getByRole('button', { name: 'Lean right 0.5°' }).click();
+  await expect(panel(page)).toHaveAttribute('data-lean', '-2,5');
+  await expect(page.locator('#adjust-selection')).toHaveText(
+    'Nail 0 at 242.7, 178.2 mm, leaning 1.0° left, 2.5° up',
+  );
+  await expect(panel(page)).toHaveAttribute('data-offset', '0,0');
+  await expect(panel(page)).toHaveAttribute('data-moved', '1');
+
+  // Six big leans up reach the 15° limit; the seventh is refused.
+  for (let i = 0; i < 5; i++) await page.keyboard.press('Shift+ArrowUp');
+  await expect(panel(page)).toHaveAttribute('data-lean', '-2,30');
+  await expect(page.locator('#adjust-problem')).toBeHidden();
+  await page.keyboard.press('ArrowUp');
+  await expect(page.locator('#adjust-problem')).toHaveText('Nails lean at most 15° each way');
+  await expect(panel(page)).toHaveAttribute('data-lean', '-2,30');
+
+  // Back to nudging with the button: the arrows nudge, and the lean stays.
+  await page.getByRole('button', { name: 'Nudge', exact: true }).click();
+  await expect(panel(page)).toHaveAttribute('data-mode', 'nudge');
+  await page.getByRole('button', { name: 'Nudge right 0.1 mm' }).click();
+  await expect(panel(page)).toHaveAttribute('data-offset', '1,0');
+  await expect(panel(page)).toHaveAttribute('data-lean', '-2,30');
+
+  await page.getByRole('button', { name: 'Reset nail' }).click();
+  await expect(panel(page)).toHaveAttribute('data-offset', '0,0');
+  await expect(panel(page)).toHaveAttribute('data-lean', '0,0');
+  await expect(panel(page)).toHaveAttribute('data-moved', '0');
+  await expect(page.locator('#handle')).toHaveAttribute('data-power', '0.500');
 });
 
 test('a nudge into the next nail is refused, with the reason', async ({ page }) => {
