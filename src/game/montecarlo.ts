@@ -53,6 +53,16 @@ export const TRAFFIC_BALLS = 10;
  */
 export const MAX_FLIGHT_S = 30;
 
+/**
+ * Balls per batch, for tools/montecarlo.ts and the live stats in
+ * nail-adjust mode (M7): small enough to balance load and, in the page, to
+ * answer an edit quickly; big enough to amortise messages and each batch's
+ * uncounted traffic. Results depend on it (each batch is its own world), so
+ * changing it changes them; the two share it so the panel and the CLI agree
+ * for the same board, power, balls and seed.
+ */
+export const BATCH_BALLS = 1000;
+
 export interface Tally {
   /** Balls launched. */
   launched: number;

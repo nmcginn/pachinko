@@ -9,6 +9,7 @@ import classicBoard from '../boards/classic.json';
 import { collectCues, createCueTracker, drainCues } from './audio/cues';
 import { bindUnlock, createSound } from './audio/sound';
 import { createAdjust } from './game/adjust';
+import { asLoaded, createLiveStats, measure, stopMeasuring } from './game/livestats';
 import { createTable, stepTable } from './game/table';
 import { createHaptics } from './haptics/haptics';
 import { bindAdjust } from './input/adjust';
@@ -26,7 +27,9 @@ import { createDebugOverlay } from './render/debug';
 import { collectGlints, createGlints } from './render/glints';
 import { createHud } from './render/hud';
 import { REEL_BAND_PX, createReel } from './render/reel';
+import { createStatsPanel } from './render/stats';
 import { parseBoard } from './sim/board';
+import { createStatsDriver } from './stats/driver';
 import { SIM_STEP_S } from './sim/world';
 
 /**
@@ -108,6 +111,35 @@ const adjustPanel = createAdjustPanel({
     down: byId('nudge-down', HTMLButtonElement),
   },
 });
+// Live stats (M7): while editing, a Web Worker measures spins per ¥1000 on
+// the board as it stands and as it loaded, at the handle's power, a batch
+// at a time; each edit redirects the next batch.
+const stats = createLiveStats();
+const statsPanel = createStatsPanel({
+  root: byId('adjust-stats', HTMLElement),
+  title: byId('stats-title', HTMLElement),
+  current: byId('stats-current', HTMLElement),
+  baseline: byId('stats-baseline', HTMLElement),
+  change: byId('stats-change', HTMLElement),
+  error: byId('stats-error', HTMLElement),
+});
+const showStats = () => statsPanel.update(stats, table.fire.power);
+const statsDriver = createStatsDriver(
+  new Worker(new URL('./stats/worker.ts', import.meta.url), { type: 'module' }),
+  stats,
+  showStats,
+);
+/** Point the stats at the board as it stands now, or stop them outside edit mode. */
+function remeasure(): void {
+  if (adjust.editing) {
+    measure(stats, table.board, asLoaded(table.board, adjust.original), table.fire.power);
+  } else {
+    stopMeasuring(stats);
+  }
+  statsDriver.pump();
+  showStats();
+}
+
 /** The board's mapping to the canvas in the latest frame, for picking nails. */
 let boardView: BoardView | null = null;
 bindAdjust(
@@ -126,9 +158,13 @@ bindAdjust(
   adjust,
   table,
   () => boardView,
-  () => adjustPanel.update(adjust, table.board),
+  () => {
+    adjustPanel.update(adjust, table.board);
+    remeasure();
+  },
 );
 adjustPanel.update(adjust, table.board);
+remeasure();
 
 const holds = createHolds(table.fire);
 bindKeyboard(window, table.fire, holds, playing);

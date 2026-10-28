@@ -24,6 +24,7 @@ import {
   type Summary,
   type Tally,
   type TulipMode,
+  BATCH_BALLS,
   TULIP_MODES,
   addTally,
   createTally,
@@ -60,13 +61,6 @@ Options:
 
 Results go to stdout and are identical for the same options. Timing goes
 to stderr.`;
-
-/**
- * Balls per unit of work handed to a worker. Small enough to balance load,
- * big enough to amortise messages and each batch's uncounted traffic. Results
- * depend on it (each batch is its own world), so changing it changes them.
- */
-const BATCH_BALLS = 1000;
 
 interface Job {
   readonly power: number;
