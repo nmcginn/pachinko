@@ -96,25 +96,37 @@ describe('createStatsDriver', () => {
     expect(stats.entries.size).toBe(1);
   });
 
-  it('a worker error stops the run with its message, until a board changes', () => {
+  it('a worker error stops the run with its message, for good: the worker is gone', () => {
     const fake = fakeWorker();
     const stats = createLiveStats();
     let changes = 0;
     const driver = createStatsDriver(fake.worker, stats, () => (changes += 1));
-    // An error with nothing in flight changes nothing.
-    fake.fail('early');
-    expect(changes).toBe(0);
-    expect(stats.error).toBeNull();
     measure(stats, nudged, classic, 0.2);
     driver.pump();
     fake.posted.length = 0;
     fake.fail();
     expect(stats.error).toBe('the worker failed');
+    expect(stats.running).toBeNull();
     expect(changes).toBe(1);
     driver.pump();
     expect(fake.posted).toEqual([]);
+    // An edit would clear a batch's error, but not a dead worker's.
     measure(stats, classic, classic, 0.2);
     driver.pump();
-    expect(fake.posted).toHaveLength(1);
+    expect(fake.posted).toEqual([]);
+    expect(stats.error).toBe('the worker failed');
+  });
+
+  it('a worker that dies while idle says so when next asked to measure', () => {
+    const fake = fakeWorker();
+    const stats = createLiveStats();
+    const driver = createStatsDriver(fake.worker, stats, () => {});
+    fake.fail('failed to load');
+    // Not editing: nothing to show it on.
+    expect(stats.error).toBeNull();
+    measure(stats, classic, classic, 0.2);
+    driver.pump();
+    expect(fake.posted).toEqual([]);
+    expect(stats.error).toBe('failed to load');
   });
 });

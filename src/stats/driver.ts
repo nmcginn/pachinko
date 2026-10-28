@@ -31,7 +31,14 @@ export function createStatsDriver(
   stats: LiveStats,
   changed: () => void,
 ): StatsDriver {
+  /** Why the worker died, once it has: it takes no more jobs. */
+  let dead: string | null = null;
   const pump = (): void => {
+    if (dead !== null) {
+      // An edit clears a batch's error; a dead worker's stays.
+      if (stats.current !== null) stats.error ??= dead;
+      return;
+    }
     const job = nextJob(stats);
     if (job) worker.postMessage(job);
   };
@@ -39,12 +46,13 @@ export function createStatsDriver(
     if (finishJob(stats, e.data)) changed();
     pump();
   });
-  // A worker that fails to load or throws outside serveJob: fail the job in
-  // flight, which stops the run until the boards change.
+  // A worker that fails to load or throws outside serveJob is done for:
+  // fail the job in flight, and every run after it.
   worker.addEventListener('error', (e) => {
+    dead = e.message || 'the worker failed';
     const job = stats.running;
-    if (!job) return;
-    finishJob(stats, { key: job.key, first: job.first, error: e.message || 'the worker failed' });
+    if (job) finishJob(stats, { key: job.key, first: job.first, error: dead });
+    else if (stats.current !== null) stats.error = dead;
     changed();
   });
   return { pump };
