@@ -11,7 +11,22 @@ export default defineConfig({
     baseURL: `http://localhost:${port}`,
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+      testIgnore: /frametime\.spec\.ts$/,
+    },
+    // The frame-time budget (M6) is measured after every other test has
+    // finished, alone, so another test's load can't eat into it: the live
+    // stats test keeps a Web Worker busy for several seconds.
+    {
+      name: 'frametime',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: /frametime\.spec\.ts$/,
+      dependencies: ['chromium'],
+    },
+  ],
   // Smoke tests run against the production build, which is what Pages serves.
   webServer: {
     command: `npm run build && npx vite preview --port ${port} --strictPort`,
