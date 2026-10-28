@@ -385,17 +385,69 @@ body {
   padding: 0 10px;
 }
 
+/* Live stats (M7), shown while editing: in portrait, centred in the band
+   between the reel and the board, which is otherwise empty; in landscape,
+   right of the board under the ball count. Never over the nail field's
+   middle, where the start nails are, nor over the adjust panel. */
+#adjust-stats {
+  position: fixed;
+  top: 92px;
+  left: 50%;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 32px));
+  padding: 6px 10px;
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  background: rgb(0 0 0 / 0.7);
+  border: 1px solid #3a3e45;
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+body:not(.editing) #adjust-stats {
+  display: none;
+}
+
+#stats-title {
+  color: #6fd3ff;
+}
+
+#stats-change {
+  font-weight: 500;
+}
+
+#stats-error {
+  color: #ff9b8a;
+}
+
+#adjust-stats [hidden] {
+  display: none;
+}
+
 .editing #handle {
   visibility: hidden;
 }
 
-/* Landscape: in the space left of the board, above the sound button. The
+/* Landscape: the panel in the space left of the board, above the sound
+   button, and the live stats right of it. The
    board is height-limited here, 0.5 / 0.53 of the height below the reel
    band (REEL_BAND_PX) and its 16 px margins: 116 px in all. */
 @media (min-aspect-ratio: 1/1) {
   #adjust-panel {
     left: 16px;
     bottom: 68px;
+    transform: none;
+    width: clamp(180px, calc((100vw - 0.9434 * (100vh - 116px)) / 2 - 32px), 300px);
+  }
+
+  #adjust-stats {
+    top: 64px;
+    left: auto;
+    right: 16px;
     transform: none;
     width: clamp(180px, calc((100vw - 0.9434 * (100vh - 116px)) / 2 - 32px), 300px);
   }
