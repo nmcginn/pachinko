@@ -18,11 +18,17 @@
 // for a nudge. Leans are kept in whole steps too, per axis: a nail leant
 // right and up moves right by h·tan θx and up by h·tan θy. A nail's
 // position is its loaded one plus its nudges plus its lean's shift.
+//
+// Importing a board file replaces the table's board, world and all: the
+// imported board is then the board as loaded, with nothing moved, and the
+// nudges and leans start again from it. Its nails are where the file put
+// them, so a nail bent before the export is just a nail in a new place.
 
-import { moveNail, nailMoveProblem } from '../sim/board';
+import { BoardError, moveNail, nailMoveProblem } from '../sim/board';
 import type { Vec2 } from '../sim/vec';
 import { BALL_RADIUS_M, moveCircle } from '../sim/world';
-import type { Table } from './table';
+import { readBoard } from './boardfile';
+import { type Table, replaceBoard } from './table';
 
 /** One nudge: 0.1 mm (PLAN.md M7). */
 export const NAIL_STEP_M = 0.0001;
@@ -63,14 +69,16 @@ export interface Adjust {
   mode: AdjustMode;
   /** Index into the board's nails (and the world's circles), or null for none. */
   selected: number | null;
-  /** The nails as the board loaded them. Offsets count from these. */
-  readonly original: readonly Vec2[];
+  /** The nails as the board loaded them, or as it was imported. Offsets count from these. */
+  original: readonly Vec2[];
   /** Per moved nail, its offset in steps. A nail back where it started has no entry. */
   readonly offsets: Map<number, NailOffset>;
   /** Per bent nail, its lean in steps. An upright nail has no entry. */
   readonly leans: Map<number, NailLean>;
   /** Why the latest move was refused, or null. Cleared by the next call that changes anything. */
   problem: string | null;
+  /** What the latest call did, when it isn't plain on the board (an import), or null. Cleared like `problem`. */
+  notice: string | null;
 }
 
 export function createAdjust(table: Table): Adjust {
@@ -82,19 +90,33 @@ export function createAdjust(table: Table): Adjust {
     offsets: new Map(),
     leans: new Map(),
     problem: null,
+    notice: null,
   };
+}
+
+/** Clear the refusal and the notice: the call that does this succeeded. */
+function clearMessages(adjust: Adjust): void {
+  adjust.problem = null;
+  adjust.notice = null;
+}
+
+/** Refuse, saying why. */
+function refuse(adjust: Adjust, problem: string): false {
+  adjust.problem = problem;
+  adjust.notice = null;
+  return false;
 }
 
 /** Turn edit mode on or off. Leaving it keeps the selection for next time, and clears any refusal. */
 export function setEditing(adjust: Adjust, editing: boolean): void {
   adjust.editing = editing;
-  adjust.problem = null;
+  clearMessages(adjust);
 }
 
 /** Switch the arrows between nudging and bending. Clears any refusal. */
 export function setMode(adjust: Adjust, mode: AdjustMode): void {
   adjust.mode = mode;
-  adjust.problem = null;
+  clearMessages(adjust);
 }
 
 /** Every nail nudged or bent away from where the board loaded it, in index order. */
@@ -124,7 +146,7 @@ export function selectNailAt(
     }
   });
   adjust.selected = best;
-  adjust.problem = null;
+  clearMessages(adjust);
   return best;
 }
 
@@ -155,12 +177,10 @@ export function leanShiftM(steps: number): number {
 export function nudgeSelected(adjust: Adjust, table: Table, dx: number, dy: number): boolean {
   const offset = selectedOffset(adjust);
   if (offset === null || adjust.selected === null) {
-    adjust.problem = 'Select a nail first';
-    return false;
+    return refuse(adjust, 'Select a nail first');
   }
   if (!(Number.isInteger(dx) && Number.isInteger(dy))) {
-    adjust.problem = `Nudges are whole steps, got (${dx}, ${dy})`;
-    return false;
+    return refuse(adjust, `Nudges are whole steps, got (${dx}, ${dy})`);
   }
   const lean = selectedLean(adjust) as NailLean;
   return placeSelected(adjust, table, { dx: offset.dx + dx, dy: offset.dy + dy }, lean);
@@ -176,17 +196,14 @@ export function leanSelected(adjust: Adjust, table: Table, lx: number, ly: numbe
   const lean = selectedLean(adjust);
   const offset = selectedOffset(adjust);
   if (lean === null || offset === null) {
-    adjust.problem = 'Select a nail first';
-    return false;
+    return refuse(adjust, 'Select a nail first');
   }
   if (!(Number.isInteger(lx) && Number.isInteger(ly))) {
-    adjust.problem = `Bends are whole steps, got (${lx}, ${ly})`;
-    return false;
+    return refuse(adjust, `Bends are whole steps, got (${lx}, ${ly})`);
   }
   const to = { lx: lean.lx + lx, ly: lean.ly + ly };
   if (Math.abs(to.lx) > MAX_LEAN_STEPS || Math.abs(to.ly) > MAX_LEAN_STEPS) {
-    adjust.problem = `Nails lean at most ${MAX_LEAN_STEPS * BEND_STEP_DEG}° each way`;
-    return false;
+    return refuse(adjust, `Nails lean at most ${MAX_LEAN_STEPS * BEND_STEP_DEG}° each way`);
   }
   return placeSelected(adjust, table, offset, to);
 }
@@ -197,8 +214,7 @@ export function leanSelected(adjust: Adjust, table: Table, lx: number, ly: numbe
  */
 export function resetSelected(adjust: Adjust, table: Table): boolean {
   if (adjust.selected === null) {
-    adjust.problem = 'Select a nail first';
-    return false;
+    return refuse(adjust, 'Select a nail first');
   }
   return placeSelected(adjust, table, { dx: 0, dy: 0 }, { lx: 0, ly: 0 });
 }
@@ -223,14 +239,12 @@ function placeSelected(adjust: Adjust, table: Table, offset: NailOffset, lean: N
   };
   const problem = nailMoveProblem(table.board, index, to);
   if (problem) {
-    adjust.problem = `Nail ${index} can't go there: ${problem}`;
-    return false;
+    return refuse(adjust, `Nail ${index} can't go there: ${problem}`);
   }
   try {
     moveCircle(table.world, index, to.x, to.y);
   } catch {
-    adjust.problem = `Nail ${index} can't go there: a ball in play is in the way`;
-    return false;
+    return refuse(adjust, `Nail ${index} can't go there: a ball in play is in the way`);
   }
   // nailMoveProblem passed, so this can't throw; and the world has moved.
   table.board = moveNail(table.board, index, to);
@@ -238,6 +252,52 @@ function placeSelected(adjust: Adjust, table: Table, offset: NailOffset, lean: N
   else adjust.offsets.set(index, offset);
   if (lean.lx === 0 && lean.ly === 0) adjust.leans.delete(index);
   else adjust.leans.set(index, lean);
-  adjust.problem = null;
+  clearMessages(adjust);
   return true;
+}
+
+/** What the panel says when a board file is refused: the first problem, and how many more. */
+export function importProblem(issues: readonly string[]): string {
+  const more = issues.length > 1 ? ` (and ${issues.length - 1} more)` : '';
+  return `Can't import that board: ${issues[0] ?? 'unknown problem'}${more}`;
+}
+
+/** Refuse a board file before reading it (too big, unreadable), as importBoard would. */
+export function refuseImport(adjust: Adjust, issue: string): void {
+  refuse(adjust, importProblem([issue]));
+}
+
+/**
+ * Load a board file's text (game/boardfile.ts) in place of the table's
+ * board: replaceBoard, then start the adjustments afresh from it, nothing
+ * selected or moved, the mode and edit mode as they were. Refused, with
+ * the file's first problem in `problem` and nothing changed, if it isn't a
+ * valid board. Returns whether it loaded.
+ */
+export function importBoard(adjust: Adjust, table: Table, text: string): boolean {
+  let board;
+  try {
+    board = readBoard(text);
+  } catch (e) {
+    if (e instanceof BoardError) return refuse(adjust, importProblem(e.issues));
+    throw e;
+  }
+  const returned = replaceBoard(table, board);
+  adjust.original = board.nails.map((n) => ({ x: n.x, y: n.y }));
+  adjust.offsets.clear();
+  adjust.leans.clear();
+  adjust.selected = null;
+  clearMessages(adjust);
+  const nails = `${board.nails.length} nail${board.nails.length === 1 ? '' : 's'}`;
+  const back =
+    returned > 0 ? `; ${returned} ball${returned === 1 ? '' : 's'} in play back to the tray` : '';
+  adjust.notice = `Imported "${board.name}", ${nails}${back}`;
+  return true;
+}
+
+/** Say that the board was exported, as `fileName`, and how many nails it has moved. */
+export function noteExported(adjust: Adjust, fileName: string): void {
+  clearMessages(adjust);
+  const moved = movedNails(adjust).length;
+  adjust.notice = `Exported ${fileName}, ${moved} nail${moved === 1 ? '' : 's'} moved`;
 }

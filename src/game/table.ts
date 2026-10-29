@@ -12,7 +12,13 @@ import {
 } from '../sim/board';
 import { type Rng, createRng, streamSeed } from '../sim/rng';
 import { type Capture, type World, setGateOpen, stepWorld } from '../sim/world';
-import { type Economy, createEconomy, recordEntry, takeBallForLaunch } from './economy';
+import {
+  type Economy,
+  createEconomy,
+  recordEntry,
+  returnBalls,
+  takeBallForLaunch,
+} from './economy';
 import { type FireControl, createFireControl, stepFire } from './fire';
 import {
   type Machine,
@@ -27,7 +33,8 @@ import { enterTulip } from './tulip';
 export interface Table {
   /** Replaced, never mutated, when a nail is adjusted (game/adjust.ts). */
   board: Board;
-  readonly world: World;
+  /** Replaced, with the board, when a board is imported (replaceBoard). */
+  world: World;
   readonly economy: Economy;
   readonly fire: FireControl;
   readonly machine: Machine;
@@ -81,6 +88,23 @@ export function createTable(board: Board, options: TableOptions = {}): Table {
     keepInPlay,
     freeBalls: new Set(),
   };
+}
+
+/**
+ * Swap in a whole new board (M7's import) and a fresh world for it. The
+ * balls in play leave with the old board: those from the tray go back to
+ * it, as if never launched, and keepInPlay's free balls just go. The tray,
+ * the handle, the reel and any jackpot carry on; the new world's gates
+ * start closed, and the next step opens the attacker if a round is on.
+ * Returns how many balls went back to the tray.
+ */
+export function replaceBoard(table: Table, board: Board): number {
+  const fromTray = table.world.balls.filter((b) => !table.freeBalls.has(b.id)).length;
+  returnBalls(table.economy, fromTray);
+  table.freeBalls.clear();
+  table.board = board;
+  table.world = createBoardWorld(board);
+  return fromTray;
 }
 
 /**
