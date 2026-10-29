@@ -86,6 +86,8 @@ export interface Launcher {
   /** Where a launched ball appears: the bottom of the launch lane. */
   readonly x: number;
   readonly y: number;
+  /** Launch direction as the board data gives it, in degrees anticlockwise from +x. Kept so the board exports as it loaded. */
+  readonly angleDeg: number;
   /** Unit launch direction. */
   readonly dirX: number;
   readonly dirY: number;
@@ -391,7 +393,7 @@ export function parseBoard(data: unknown): Board {
     if (x !== null && y !== null) onBoard({ x, y }, 'launcher');
     if (x !== null && y !== null && angleDeg !== null && minSpeedMps !== null) {
       const a = (angleDeg * Math.PI) / 180;
-      launcher = { x, y, dirX: Math.cos(a), dirY: Math.sin(a), minSpeedMps };
+      launcher = { x, y, angleDeg, dirX: Math.cos(a), dirY: Math.sin(a), minSpeedMps };
     }
   }
 
@@ -418,6 +420,59 @@ export function parseBoard(data: unknown): Board {
   if (inPocket) c.fail('launcher', `${fmt(at)} is inside pocket "${inPocket.id}"`);
   if (c.issues.length > 0) throw new BoardError(c.issues);
   return board;
+}
+
+/** A point as the board data writes it. */
+export type PointData = [number, number];
+
+/** A board as plain JSON data, in the schema parseBoard reads (see the top of this file). */
+export interface BoardData {
+  name: string;
+  widthM: number;
+  heightM: number;
+  nails: PointData[];
+  rails: { id: string; points: PointData[] }[];
+  pockets: {
+    id: string;
+    kind: PocketKind;
+    polygon: PointData[];
+    lid?: PointData[];
+    wings?: { closed: PointData[][]; open: PointData[][] };
+  }[];
+  launcher: { x: number; y: number; angleDeg: number; minSpeedMps: number };
+}
+
+/**
+ * The inverse of parseBoard: a board as JSON data, with the fields in the
+ * order boards/classic.json has them. parseBoard(boardData(b)) equals b.
+ * For M7's export.
+ */
+export function boardData(board: Board): BoardData {
+  const pt = (p: Vec2): PointData => [p.x, p.y];
+  const line = (points: readonly Vec2[]): PointData[] => points.map(pt);
+  const { launcher } = board;
+  return {
+    name: board.name,
+    widthM: board.widthM,
+    heightM: board.heightM,
+    nails: line(board.nails),
+    rails: board.rails.map((r) => ({ id: r.id, points: line(r.points) })),
+    pockets: board.pockets.map((p) => ({
+      id: p.id,
+      kind: p.kind,
+      polygon: line(p.polygon),
+      ...(p.lid ? { lid: line(p.lid) } : {}),
+      ...(p.wings
+        ? { wings: { closed: p.wings.closed.map(line), open: p.wings.open.map(line) } }
+        : {}),
+    })),
+    launcher: {
+      x: launcher.x,
+      y: launcher.y,
+      angleDeg: launcher.angleDeg,
+      minSpeedMps: launcher.minSpeedMps,
+    },
+  };
 }
 
 interface NamedLine {
