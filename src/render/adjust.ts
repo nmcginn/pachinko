@@ -3,7 +3,8 @@
 // one a brighter ring with a line back to where it started; in the DOM, the
 // panel that says which nail is selected, where it is, how far it has been
 // nudged and how far it leans, or why the last move was refused, and which
-// mode the arrows are in. data-* attributes mirror the numbers for tests.
+// mode the arrows are in. After an export or import, the line about the
+// selection says what that did instead, until the next action. data-* attributes mirror the numbers for tests.
 
 import {
   type Adjust,
@@ -133,7 +134,7 @@ export function createAdjustPanel(els: AdjustPanelElements): AdjustPanel {
       const offset = selectedOffset(adjust);
       const lean = selectedLean(adjust);
       const moved = movedNails(adjust).length;
-      const selection = describeSelection(adjust, board);
+      const selection = adjust.notice ?? describeSelection(adjust, board);
       const key = [adjust.editing, adjust.mode, selection, adjust.problem, moved].join('|');
       if (key === shown) return;
       shown = key;
@@ -147,6 +148,7 @@ export function createAdjustPanel(els: AdjustPanelElements): AdjustPanel {
       els.panel.dataset['offset'] = offset ? `${offset.dx},${offset.dy}` : '';
       els.panel.dataset['lean'] = lean ? `${lean.lx},${lean.ly}` : '';
       els.panel.dataset['moved'] = String(moved);
+      els.panel.dataset['notice'] = adjust.notice ?? '';
       els.panel.dataset['mode'] = adjust.mode;
       els.nudgeMode.setAttribute('aria-pressed', String(adjust.mode === 'nudge'));
       els.bendMode.setAttribute('aria-pressed', String(adjust.mode === 'bend'));

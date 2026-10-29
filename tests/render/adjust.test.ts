@@ -1,6 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createAdjust, leanSelected, nudgeSelected, selectNailAt } from '../../src/game/adjust';
+import {
+  createAdjust,
+  importBoard,
+  leanSelected,
+  noteExported,
+  nudgeSelected,
+  selectNailAt,
+} from '../../src/game/adjust';
 import { createTable } from '../../src/game/table';
 import { arrowLabel, createAdjustPanel, describeSelection } from '../../src/render/adjust';
 import { parseBoard } from '../../src/sim/board';
@@ -119,5 +126,40 @@ describe('createAdjustPanel', () => {
     // A bent nail counts as moved, though it has no nudge.
     expect(els.panel.dataset['moved']).toBe('1');
     expect(els.selection.textContent).toBe('Nail 0 at 242.7, 178.0 mm, leaning 1.0° left');
+  });
+
+  it('says what an export or import did in place of the selection, until the next action', () => {
+    const els = {
+      toggle: element(),
+      panel: element(),
+      selection: element(),
+      problem: element(),
+      root: element(),
+      nudgeMode: element(),
+      bendMode: element(),
+      arrows: { left: element(), right: element(), up: element(), down: element() },
+    };
+    const panel = createAdjustPanel(els as unknown as Parameters<typeof createAdjustPanel>[0]);
+    const table = createTable(classic);
+    const adjust = createAdjust(table);
+    adjust.editing = true;
+    selectNailAt(adjust, table, 0.2428, 0.178, 0.001);
+    nudgeSelected(adjust, table, -1, 0);
+    noteExported(adjust, 'classic.json');
+    panel.update(adjust, table.board);
+    expect(els.selection.textContent).toBe('Exported classic.json, 1 nail moved');
+    expect(els.panel.dataset['notice']).toBe('Exported classic.json, 1 nail moved');
+
+    importBoard(adjust, table, readFileSync('boards/classic.json', 'utf8'));
+    panel.update(adjust, table.board);
+    expect(els.selection.textContent).toBe(`Imported "classic", ${classic.nails.length} nails`);
+    expect(els.panel.dataset['moved']).toBe('0');
+    expect(els.panel.dataset['selected']).toBe('');
+
+    importBoard(adjust, table, '{}');
+    panel.update(adjust, table.board);
+    expect(els.problem.textContent).toMatch(/^Can't import that board: name: /);
+    expect(els.selection.textContent).toBe('Click or tap a nail to select it');
+    expect(els.panel.dataset['notice']).toBe('');
   });
 });
