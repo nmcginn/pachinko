@@ -13,6 +13,7 @@ import { asLoaded, createLiveStats, measure, stopMeasuring } from './game/livest
 import { createTable, stepTable } from './game/table';
 import { createHaptics } from './haptics/haptics';
 import { bindAdjust } from './input/adjust';
+import { bindBoardFile, browserDownloads } from './input/boardfile';
 import { bindDebugKeys } from './input/debug';
 import { bindDial, bindKeyboard, createHolds } from './input/launcher';
 import { bindMute, loadMuted } from './input/mute';
@@ -163,6 +164,24 @@ bindAdjust(
     remeasure();
   },
 );
+// Export and import (M7): the board as it stands to a JSON file, or one
+// in its place. An import replaces the table's world, so what is kept per
+// world (the glints) starts again with it.
+bindBoardFile(
+  {
+    exportButton: byId('board-export', HTMLButtonElement),
+    importButton: byId('board-import', HTMLButtonElement),
+    file: byId('board-file', HTMLInputElement),
+  },
+  adjust,
+  table,
+  browserDownloads(document),
+  () => {
+    adjustPanel.update(adjust, table.board);
+    remeasure();
+  },
+  () => (glints = createGlints(table.world)),
+);
 adjustPanel.update(adjust, table.board);
 remeasure();
 
@@ -197,7 +216,7 @@ const haptics = hapticsSupported(navigator, window.matchMedia('(pointer: coarse)
   : null;
 if (haptics) bindVibration(window, byId('vibration', HTMLButtonElement), haptics, storage);
 const cues = createCueTracker(table);
-const glints = createGlints(table.world);
+let glints = createGlints(table.world);
 // No screen flash for players who ask for less motion (M8 builds on this).
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const flash = createFlash(byId('flash', HTMLElement), () => reducedMotion.matches);

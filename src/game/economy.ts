@@ -67,3 +67,16 @@ export function recordEntry(economy: Economy, kind: PocketKind): void {
   economy.paidOut += PAYOUT[kind];
   if (kind === 'foul') economy.balls += 1;
 }
+
+/**
+ * Put balls that were in play back in the tray, as if never launched: for
+ * M7's board import, which takes them off the old board (game/table.ts
+ * replaceBoard). They pay nothing and aren't entries.
+ */
+export function returnBalls(economy: Economy, count: number): void {
+  if (!(Number.isInteger(count) && count >= 0 && count <= economy.launched)) {
+    throw new RangeError(`can return 0 to ${economy.launched} balls, got ${count}`);
+  }
+  economy.balls += count;
+  economy.launched -= count;
+}

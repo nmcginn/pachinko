@@ -36,9 +36,20 @@
       <div id="adjust-title">Adjusting nails: play is paused</div>
       <div id="adjust-selection" role="status"></div>
       <div id="adjust-problem" role="alert"></div>
-      <div id="adjust-modes" role="group" aria-label="Arrows">
-        <button id="mode-nudge" type="button" aria-pressed="true" title="Nudge (B)">Nudge</button>
-        <button id="mode-bend" type="button" aria-pressed="false" title="Bend (B)">Bend</button>
+      <div id="adjust-tools">
+        <div id="adjust-modes" role="group" aria-label="Arrows">
+          <button id="mode-nudge" type="button" aria-pressed="true" title="Nudge (B)">Nudge</button>
+          <button id="mode-bend" type="button" aria-pressed="false" title="Bend (B)">Bend</button>
+        </div>
+        <div id="adjust-file" role="group" aria-label="Board file">
+          <button id="board-export" type="button" title="Save this board as a JSON file">
+            Export
+          </button>
+          <button id="board-import" type="button" title="Load a board from a JSON file">
+            Import
+          </button>
+          <input id="board-file" type="file" accept=".json,application/json" hidden />
+        </div>
       </div>
       <div id="adjust-buttons">
         <button id="nudge-left" type="button" aria-label="Nudge left 0.1 mm">←</button>

@@ -338,14 +338,27 @@ body {
   display: none;
 }
 
-#adjust-modes {
+/* The mode buttons and, after a wider gap, the board file's: one row in
+   portrait, so the panel is no taller than it was; two in a narrow
+   landscape panel, where there is room above it. */
+#adjust-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 16px;
+}
+
+#adjust-modes,
+#adjust-file {
   display: flex;
   justify-content: center;
   gap: 6px;
 }
 
-#adjust-modes button {
-  min-width: 88px;
+#adjust-modes button,
+#adjust-file button {
+  min-width: 68px;
+  padding: 0 8px;
   min-height: 44px;
   font: inherit;
   font-size: 15px;
