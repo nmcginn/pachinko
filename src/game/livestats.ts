@@ -84,7 +84,7 @@ export function statsKey(board: Board, power: number): string {
   return `${power}|${JSON.stringify(board)}`;
 }
 
-/** `board` with its nails where they loaded (`original`, as in Adjust): the panel's baseline. */
+/** `board` with its nails where they loaded (`original`, as in Adjust). */
 export function asLoaded(board: Board, original: readonly Vec2[]): Board {
   return { ...board, nails: original.map((n) => ({ x: n.x, y: n.y })) };
 }
