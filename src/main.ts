@@ -9,7 +9,7 @@ import classicBoard from '../boards/classic.json';
 import { collectCues, createCueTracker, drainCues } from './audio/cues';
 import { bindUnlock, createSound } from './audio/sound';
 import { createAdjust } from './game/adjust';
-import { asLoaded, createLiveStats, measure, stopMeasuring } from './game/livestats';
+import { createLiveStats, measure, stopMeasuring } from './game/livestats';
 import { createTable, stepTable } from './game/table';
 import { createHaptics } from './haptics/haptics';
 import { bindAdjust } from './input/adjust';
@@ -113,8 +113,11 @@ const adjustPanel = createAdjustPanel({
   },
 });
 // Live stats (M7): while editing, a Web Worker measures spins per ¥1000 on
-// the board as it stands and as it loaded, at the handle's power, a batch
-// at a time; each edit redirects the next batch.
+// the board as it stands and as the page loaded it, at the handle's power, a
+// batch at a time; each edit redirects the next batch. The baseline stays the
+// page's own board across imports (the maintainer's choice), so an edited
+// board exported, reloaded and imported still shows its change.
+const startBoard = table.board;
 const stats = createLiveStats();
 const statsPanel = createStatsPanel({
   root: byId('adjust-stats', HTMLElement),
@@ -133,7 +136,7 @@ const statsDriver = createStatsDriver(
 /** Point the stats at the board as it stands now, or stop them outside edit mode. */
 function remeasure(): void {
   if (adjust.editing) {
-    measure(stats, table.board, asLoaded(table.board, adjust.original), table.fire.power);
+    measure(stats, table.board, startBoard, table.fire.power);
   } else {
     stopMeasuring(stats);
   }

@@ -22,6 +22,9 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('M2 acceptance: holding fire for 3 s makes the ball counter drop', async ({ page }) => {
+  // Seed 1: no start or tulip entry from shots held 1 to 4 s (searched with a
+  // headless table), so the payouts can't bring the counter back up to 250.
+  await page.goto('/?seed=1');
   await expect(page.locator('#balls')).toHaveText('Balls 250');
   await page.keyboard.down('Space');
   await page.waitForTimeout(3000);

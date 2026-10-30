@@ -89,9 +89,11 @@ test('edits round-trip through export and import', async ({ page }) => {
   });
   await expect(panel(page)).toHaveAttribute('data-notice', /^Imported "classic", \d+ nails$/);
   await expect(page.locator('#adjust-selection')).toHaveText(/^Imported "classic"/);
-  // The imported board is the board as loaded now: nothing counts as moved.
+  // The imported board is the edits' new starting point: nothing counts as
+  // moved. The live stats still compare it with the board the page loaded.
   await expect(panel(page)).toHaveAttribute('data-moved', '0');
-  await expect(page.locator('#stats-current')).toContainText('Board as loaded');
+  await expect(page.locator('#stats-current')).toContainText('This board');
+  await expect(page.locator('#stats-baseline')).toContainText('As loaded');
   expect((await exportBoard(page)).text).toBe(edited.text);
 
   // A nail of the imported board selects where the file put it.
