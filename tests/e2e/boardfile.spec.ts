@@ -4,25 +4,15 @@
 
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
-import { fitBoard } from '../../src/render/board';
-import { REEL_BAND_PX } from '../../src/render/reel';
+import { clickBoard } from './boardview';
 
-/** The classic board's size and its two start nails (boards/classic.json nails[0], nails[1]). */
-const BOARD_W_M = 0.5;
-const BOARD_H_M = 0.53;
+/** The classic board's two start nails (boards/classic.json nails[0], nails[1]). */
 const START_NAILS = [
   { x: 0.2428, y: 0.178 },
   { x: 0.2573, y: 0.178 },
 ] as const;
 
 const panel = (page: Page) => page.locator('#adjust-panel');
-
-async function clickBoard(page: Page, x: number, y: number): Promise<void> {
-  const size = page.viewportSize();
-  if (!size) throw new Error('no viewport');
-  const bv = fitBoard(size.width, size.height, BOARD_W_M, BOARD_H_M, undefined, REEL_BAND_PX);
-  await page.mouse.click(bv.ox + x * bv.scale, bv.oy - y * bv.scale);
-}
 
 /** Click Export and return the saved file's name and text. */
 async function exportBoard(page: Page): Promise<{ name: string; text: string }> {
