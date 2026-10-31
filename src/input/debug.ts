@@ -15,3 +15,23 @@ export function bindDebugKeys(target: Window, machine: Machine): () => void {
   target.addEventListener('keydown', down);
   return () => target.removeEventListener('keydown', down);
 }
+
+export const DEBUG_OVERLAY_CODE = 'KeyD';
+
+/**
+ * D shows or hides the debug overlay (M8: it starts hidden unless the URL
+ * asks for it). Calls `changed` after each toggle. Returns an unbind function.
+ */
+export function bindDebugToggle(
+  target: Window,
+  overlay: HTMLElement,
+  changed: () => void,
+): () => void {
+  const down = (e: KeyboardEvent): void => {
+    if (e.code !== DEBUG_OVERLAY_CODE || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+    overlay.hidden = !overlay.hidden;
+    changed();
+  };
+  target.addEventListener('keydown', down);
+  return () => target.removeEventListener('keydown', down);
+}

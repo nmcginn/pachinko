@@ -14,20 +14,21 @@ import { createTable, stepTable } from './game/table';
 import { createHaptics } from './haptics/haptics';
 import { bindAdjust } from './input/adjust';
 import { bindBoardFile, browserDownloads } from './input/boardfile';
-import { bindDebugKeys } from './input/debug';
+import { bindDebugKeys, bindDebugToggle } from './input/debug';
 import { bindDial, bindKeyboard, createHolds } from './input/launcher';
 import { bindMute, loadMuted } from './input/mute';
 import { bindVibration, hapticsSupported, loadVibration } from './input/vibration';
 import { bindVisibility, createClock, createLoop } from './loop';
 import { createAdjustPanel, drawAdjust } from './render/adjust';
 import { drawBalls } from './render/balls';
-import { type BoardView, drawBoard, drawGlints } from './render/board';
+import { type BoardView, MARGIN_PX, drawBoard, drawGlints } from './render/board';
 import { attachCanvas } from './render/canvas';
 import { createFlash } from './render/celebration';
 import { createDebugOverlay } from './render/debug';
 import { collectGlints, createGlints } from './render/glints';
 import { createHud } from './render/hud';
-import { REEL_BAND_PX, createReel } from './render/reel';
+import { type Rect, freeArea } from './render/layout';
+import { createReel } from './render/reel';
 import { createStatsPanel } from './render/stats';
 import { parseBoard } from './sim/board';
 import { createStatsDriver } from './stats/driver';
@@ -47,7 +48,8 @@ function byId<T extends HTMLElement>(id: string, type: new () => T): T {
 
 const canvas = byId('board', HTMLCanvasElement);
 const view = attachCanvas(canvas);
-const overlay = createDebugOverlay(byId('debug', HTMLElement));
+const debugEl = byId('debug', HTMLElement);
+const overlay = createDebugOverlay(debugEl);
 const hud = createHud({
   balls: byId('balls', HTMLElement),
   handle: byId('handle', HTMLElement),
@@ -92,6 +94,39 @@ const table = createTable(parseBoard(classicBoard), {
   seed: pickSeed(),
   keepInPlay: pickInPlay(),
 });
+
+// The debug overlay is off for players: `?debug` (or `?inplay`, which is
+// for reading its frame times) shows it, and D toggles it. It keeps
+// updating while hidden, for tests.
+const params = new URLSearchParams(location.search);
+debugEl.hidden = !params.has('debug') && !params.has('inplay');
+
+// Responsive layout (M8): the board goes in the largest space the controls
+// leave (render/layout.ts). Their boxes are measured again only when
+// something moves them: a resize, a control changing size or showing or
+// hiding (edit mode, the vibration toggle), or the debug overlay toggling.
+const ui = byId('ui', HTMLElement);
+let boardArea: Rect | null = null;
+const relayout = (): void => {
+  boardArea = null;
+};
+const layoutObserver = new ResizeObserver(relayout);
+for (const el of [ui, debugEl, ...ui.children]) layoutObserver.observe(el);
+window.addEventListener('resize', relayout);
+/** The rectangle the board is fitted in, in CSS pixels, measured if stale. */
+function currentBoardArea(): Rect {
+  if (boardArea) return boardArea;
+  const obstacles = [debugEl, ...ui.children].map((el) => el.getBoundingClientRect());
+  boardArea = freeArea(
+    { left: 0, top: 0, right: view.cssWidth, bottom: view.cssHeight },
+    obstacles,
+    table.board.widthM,
+    table.board.heightM,
+    MARGIN_PX,
+  );
+  return boardArea;
+}
+bindDebugToggle(window, debugEl, relayout);
 
 // Nail adjustment (M7). While editing, the table isn't stepped, and the
 // handle's keys and dial do nothing: the arrows nudge or bend the selected nail.
@@ -165,6 +200,7 @@ bindAdjust(
   () => {
     adjustPanel.update(adjust, table.board);
     remeasure();
+    relayout();
   },
 );
 // Export and import (M7): the board as it stands to a JSON file, or one
@@ -182,6 +218,8 @@ bindBoardFile(
   () => {
     adjustPanel.update(adjust, table.board);
     remeasure();
+    // An imported board can be another size: fit it afresh.
+    relayout();
   },
   () => (glints = createGlints(table.world)),
 );
@@ -244,8 +282,11 @@ const loop = createLoop(
       const frameCues = drainCues(cues);
       sound.play(frameCues);
       haptics?.play(frameCues);
-      const bv = drawBoard(view, table.board, table.world.gates, REEL_BAND_PX);
+      const bv = drawBoard(view, table.board, table.world.gates, currentBoardArea());
       boardView = bv;
+      // For tests: where the board is drawn (px = ox + x·scale, py = oy − y·scale).
+      const where = `${bv.scale},${bv.ox},${bv.oy}`;
+      if (canvas.dataset['boardView'] !== where) canvas.dataset['boardView'] = where;
       const glinting = drawGlints(view, bv, table.board, glints, table.world.steps);
       // For tests: nails glinting in this frame. Only written when it changes.
       if (canvas.dataset['glints'] !== String(glinting))
