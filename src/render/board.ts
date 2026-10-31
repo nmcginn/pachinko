@@ -9,6 +9,7 @@ import type { Vec2 } from '../sim/vec';
 import { type Gate, NAIL_RADIUS_M } from '../sim/world';
 import type { CanvasView } from './canvas';
 import { type Glints, glintLevel } from './glints';
+import { type Rect, scaleIn } from './layout';
 
 const BACKGROUND = '#14161a';
 const PLAYFIELD = '#1f3a2c';
@@ -28,7 +29,8 @@ const POCKET_FILL: Record<PocketKind, string> = {
   attacker: 'rgb(240 190 60 / 0.55)',
   tulip: 'rgb(220 90 160 / 0.6)',
 };
-const MARGIN_PX = 16;
+/** Clear space round the board, CSS pixels. */
+export const MARGIN_PX = 16;
 
 /** The moving parts that are solid now: closed lids, and each tulip's wings in its current shape. */
 export function gateLines(board: Board, gates: readonly Gate[]): (readonly Vec2[])[] {
@@ -55,7 +57,7 @@ export function boardPointM(bv: BoardView, xPx: number, yPx: number): { x: numbe
 
 /**
  * Largest scale that fits the whole board in the canvas with a margin,
- * centred in what is left below a band of `topPx` (the reel panel's).
+ * centred in what is left below a band of `topPx`.
  */
 export function fitBoard(
   cssWidth: number,
@@ -65,31 +67,47 @@ export function fitBoard(
   marginPx = MARGIN_PX,
   topPx = 0,
 ): BoardView {
-  const usableHeight = cssHeight - topPx;
-  const scale = Math.max(
-    0,
-    Math.min((cssWidth - 2 * marginPx) / widthM, (usableHeight - 2 * marginPx) / heightM),
+  return fitBoardIn(
+    { left: 0, top: topPx, right: cssWidth, bottom: cssHeight },
+    widthM,
+    heightM,
+    marginPx,
   );
+}
+
+/** Largest scale that fits the whole board in `area` (CSS pixels) with a margin, centred in it. */
+export function fitBoardIn(
+  area: Rect,
+  widthM: number,
+  heightM: number,
+  marginPx = MARGIN_PX,
+): BoardView {
+  const scale = scaleIn(area, widthM, heightM, marginPx);
   return {
     scale,
-    ox: (cssWidth - widthM * scale) / 2,
-    oy: topPx + (usableHeight + heightM * scale) / 2,
+    ox: (area.left + area.right - widthM * scale) / 2,
+    oy: (area.top + area.bottom + heightM * scale) / 2,
   };
 }
 
 /**
- * Draw the board below a top band of `topPx`. Gates come from the world: a
- * closed attacker's lid is drawn, and each tulip's wings in its state.
+ * Draw the board fitted in `area` (the whole canvas if none; see
+ * render/layout.ts). Gates come from the world: a closed attacker's lid is
+ * drawn, and each tulip's wings in its state.
  */
 export function drawBoard(
   view: CanvasView,
   board: Board,
   gates: readonly Gate[],
-  topPx = 0,
+  area?: Rect,
 ): BoardView {
   const { ctx, cssWidth: w, cssHeight: h } = view;
   view.resetTransform();
-  const bv = fitBoard(w, h, board.widthM, board.heightM, MARGIN_PX, topPx);
+  const bv = fitBoardIn(
+    area ?? { left: 0, top: 0, right: w, bottom: h },
+    board.widthM,
+    board.heightM,
+  );
   const px = (x: number) => bv.ox + x * bv.scale;
   const py = (y: number) => bv.oy - y * bv.scale;
 
