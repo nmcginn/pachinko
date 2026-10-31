@@ -31,8 +31,12 @@ body {
   pointer-events: none;
 }
 
+/* Debug overlay: off unless ?debug (or ?inplay) is in the URL, or D is
+   pressed. Top left, over whatever is there: it is a tool, not part of the
+   game, and the board is fitted round it while it shows. */
 #debug {
   position: fixed;
+  z-index: 1;
   top: 8px;
   left: 8px;
   margin: 0;
@@ -49,10 +53,47 @@ body {
   pointer-events: none;
 }
 
-#hud {
+#debug[hidden] {
+  display: none;
+}
+
+/* Responsive layout (M8), portrait first. Every control sits in this grid
+   over the full-screen canvas, at the screen's edges, and render/layout.ts
+   fits the board in the largest space they leave (main.ts measures them).
+   The grid lets clicks through to the canvas; the controls take their own.
+
+   Portrait, top to bottom: the reel and the ball count; the live stats
+   (editing only, in place of the reel and ball count, since play is paused);
+   the board; the adjust panel (editing only); then the buttons, stacked at
+   the bottom left, and the launch handle at the bottom right, under the
+   right thumb, so the game plays one-handed. */
+#ui {
   position: fixed;
-  top: 8px;
-  right: 8px;
+  inset: 0;
+  box-sizing: border-box;
+  padding: max(8px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
+  grid-template-rows: auto auto 1fr auto auto;
+  grid-template-areas:
+    '.       reel    hud'
+    'stats   stats   stats'
+    '.       .       .'
+    'panel   panel   panel'
+    'buttons buttons handle';
+  gap: 8px;
+  pointer-events: none;
+}
+
+#ui > * {
+  pointer-events: auto;
+}
+
+#hud {
+  grid-area: hud;
+  justify-self: end;
+  align-self: start;
   padding: 6px 12px;
   font-weight: 500;
   font-size: 20px;
@@ -62,13 +103,10 @@ body {
   pointer-events: none;
 }
 
-/* LCD-style reel panel, top centre, above the board. The board is fitted
-   below REEL_BAND_PX (render/reel.ts): keep the two in step. */
+/* LCD-style reel panel, top centre, above the board; left of centre on a
+   screen too narrow for it and the ball count side by side. */
 #reel {
-  position: fixed;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
+  grid-area: reel;
   box-sizing: border-box;
   height: 72px;
   min-width: 132px;
@@ -193,13 +231,21 @@ body {
   }
 }
 
-/* Sound toggle: bottom left, away from the handle. aria-pressed is muted.
-   The vibration toggle sits above it, on touch screens only. */
+/* The buttons: sound, vibration (touch screens only) and adjust nails, at
+   the bottom left, away from the handle. aria-pressed is muted for sound. */
+#controls {
+  grid-area: buttons;
+  align-self: end;
+  justify-self: start;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 #mute,
-#vibration {
-  position: fixed;
-  left: 16px;
-  bottom: 16px;
+#vibration,
+#adjust {
   min-height: 44px;
   padding: 0 14px;
   font: inherit;
@@ -210,6 +256,7 @@ body {
   border: 2px solid #c9a227;
   border-radius: 22px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 #mute[aria-pressed='true'],
@@ -218,19 +265,16 @@ body {
   color: #9a978f;
 }
 
-#vibration {
-  bottom: 68px;
-}
-
 #vibration[hidden] {
   display: none;
 }
 
 /* Launch handle: bottom right, under the right thumb on a phone. */
 #handle {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
+  grid-area: handle;
+  justify-self: end;
+  align-self: end;
+  position: relative;
   width: 112px;
   height: 112px;
   border-radius: 50%;
@@ -274,40 +318,22 @@ body {
   pointer-events: none;
 }
 
-/* Nail adjustment (M7): the toggle at the bottom centre, between the sound
-   button and the handle. While editing, the panel sits above it on a
-   portrait screen, below the board, and beside the board on a landscape
-   one, so it never hides nails; the handle is hidden, since it does nothing
-   until play resumes. */
-#adjust {
-  position: fixed;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  min-height: 44px;
-  padding: 0 16px;
-  font: inherit;
-  font-weight: 500;
-  font-size: 15px;
-  color: inherit;
-  background: rgb(0 0 0 / 0.55);
-  border: 2px solid #c9a227;
-  border-radius: 22px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
+/* Nail adjustment (M7). While editing, the panel sits above the buttons,
+   full width, in portrait, and left of the board in landscape; the board is
+   fitted clear of it, so every nail can be seen and clicked. The handle,
+   the sound and vibration toggles are hidden: they do nothing useful while
+   play is paused (M and V still work). */
 #adjust[aria-pressed='true'] {
   border-color: #6fd3ff;
 }
 
 #adjust-panel {
-  position: fixed;
-  left: 50%;
-  bottom: 68px;
-  transform: translateX(-50%);
+  grid-area: panel;
+  justify-self: center;
   box-sizing: border-box;
-  width: min(360px, calc(100vw - 32px));
+  width: min(360px, 100%);
+  min-height: 0;
+  overflow-y: auto;
   padding: 10px 12px;
   display: grid;
   gap: 6px;
@@ -320,6 +346,12 @@ body {
 }
 
 #adjust-panel[hidden] {
+  display: none;
+}
+
+.editing #handle,
+.editing #mute,
+.editing #vibration {
   display: none;
 }
 
@@ -398,17 +430,15 @@ body {
   padding: 0 10px;
 }
 
-/* Live stats (M7), shown while editing: in portrait, centred in the band
-   between the reel and the board, which is otherwise empty; in landscape,
-   right of the board under the ball count. Never over the nail field's
-   middle, where the start nails are, nor over the adjust panel. */
+/* Live stats (M7), shown while editing: at the top in portrait, in place
+   of the reel and the ball count; right of the board in landscape, under
+   the ball count. */
 #adjust-stats {
-  position: fixed;
-  top: 92px;
-  left: 50%;
-  transform: translateX(-50%);
+  grid-area: stats;
+  justify-self: center;
+  align-self: start;
   box-sizing: border-box;
-  width: min(360px, calc(100vw - 32px));
+  width: min(360px, 100%);
   padding: 6px 10px;
   display: grid;
   gap: 2px;
@@ -441,27 +471,46 @@ body:not(.editing) #adjust-stats {
   display: none;
 }
 
-.editing #handle {
-  visibility: hidden;
+@media (max-aspect-ratio: 1/1) {
+  .editing #reel,
+  .editing #hud {
+    display: none;
+  }
 }
 
-/* Landscape: the panel in the space left of the board, above the sound
-   button, and the live stats right of it. The
-   board is height-limited here, 0.5 / 0.53 of the height below the reel
-   band (REEL_BAND_PX) and its 16 px margins: 116 px in all. */
+/* Landscape: the board in the middle at full height. Left of it, the
+   adjust panel (editing) above the buttons, which wrap into rows there;
+   right of it, the reel, the ball count, the live stats (editing) and the
+   handle at the bottom. */
 @media (min-aspect-ratio: 1/1) {
-  #adjust-panel {
-    left: 16px;
-    bottom: 68px;
-    transform: none;
-    width: clamp(180px, calc((100vw - 0.9434 * (100vh - 116px)) / 2 - 32px), 300px);
+  #ui {
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-areas:
+      'panel   . reel'
+      'panel   . hud'
+      'panel   . stats'
+      'panel   . .'
+      'buttons . handle';
+    padding-top: max(16px, env(safe-area-inset-top));
   }
 
+  #reel,
+  #hud {
+    justify-self: end;
+  }
+
+  #adjust-panel,
   #adjust-stats {
-    top: 64px;
-    left: auto;
-    right: 16px;
-    transform: none;
-    width: clamp(180px, calc((100vw - 0.9434 * (100vh - 116px)) / 2 - 32px), 300px);
+    width: clamp(180px, 24vw, 280px);
+  }
+
+  #adjust-panel {
+    align-self: end;
+  }
+
+  #controls {
+    flex-flow: row wrap;
+    width: clamp(180px, 24vw, 280px);
   }
 }

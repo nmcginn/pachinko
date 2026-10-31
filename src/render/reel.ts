@@ -9,12 +9,6 @@ import { HOLD_LIMIT, REEL_SYMBOLS } from '../game/lottery';
 import { type Machine, ROUNDS, ROUND_BALLS, SPIN_STEPS } from '../game/machine';
 import { celebrating } from './celebration';
 
-/**
- * Height the reel panel takes at the top of the screen, CSS pixels. The
- * board is fitted below it. Keep in step with #reel in style.css.
- */
-export const REEL_BAND_PX = 84;
-
 /** Fraction of the spin at which each reel stops: left, then right, then centre, as on real machines. */
 export const REEL_STOP_AT: readonly [number, number, number] = [0.5, 1, 0.75];
 /** Sim steps per symbol while a reel spins: 25 symbols a second. */
