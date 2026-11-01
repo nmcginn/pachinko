@@ -9,7 +9,9 @@ function fakeSound(startMuted = false): Sound {
     get muted() {
       return muted;
     },
+    volume: 1,
     unlock: () => undefined,
+    setVolume: () => undefined,
     setMuted(value) {
       muted = value;
     },
