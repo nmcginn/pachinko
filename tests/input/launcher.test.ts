@@ -7,6 +7,7 @@ import {
   bindKeyboard,
   createHolds,
   dialAngleToPower,
+  inFormField,
   pointerAngleDeg,
   powerToDialAngleDeg,
 } from '../../src/input/launcher';
@@ -68,9 +69,11 @@ describe('keyboard', () => {
     const target = new EventTarget();
     const fire = createFireControl();
     const unbind = bindKeyboard(target as unknown as Window, fire, createHolds(fire), active);
-    const send = (type: string, props: { code?: string; key?: string }) => {
+    const send = (type: string, props: { code?: string; key?: string }, tagName?: string) => {
       const e = new Event(type, { cancelable: true });
       Object.assign(e, props);
+      // An own property shadows Event's target getter, so the handler sees a form field.
+      if (tagName) Object.defineProperty(e, 'target', { value: { tagName } });
       target.dispatchEvent(e);
       return e;
     };
@@ -142,5 +145,34 @@ describe('keyboard', () => {
     active = true;
     send('keydown', { code: 'ArrowUp', key: 'ArrowUp' });
     expect(fire.power).toBeCloseTo(0.5 + POWER_STEP, 12);
+  });
+
+  it('leaves keys in a form field alone (the settings selects and volume slider)', () => {
+    const { fire, send } = setup();
+    for (const tag of ['SELECT', 'INPUT', 'TEXTAREA']) {
+      const arrow = send('keydown', { code: 'ArrowUp', key: 'ArrowUp' }, tag);
+      const space = send('keydown', { code: 'Space', key: ' ' }, tag);
+      expect(arrow.defaultPrevented, tag).toBe(false);
+      expect(space.defaultPrevented, tag).toBe(false);
+      expect(fire).toMatchObject({ held: false, power: 0.5 });
+    }
+    // A button is not a form field: space on the focused mute button still fires.
+    send('keydown', { code: 'Space', key: ' ' }, 'BUTTON');
+    expect(fire.held).toBe(true);
+  });
+
+  it('inFormField: only inputs, selects and text areas', () => {
+    const ev = (target: unknown) => {
+      const e = new Event('keydown');
+      Object.defineProperty(e, 'target', { value: target });
+      return e;
+    };
+    expect(inFormField(ev({ tagName: 'INPUT' }))).toBe(true);
+    expect(inFormField(ev({ tagName: 'SELECT' }))).toBe(true);
+    expect(inFormField(ev({ tagName: 'TEXTAREA' }))).toBe(true);
+    expect(inFormField(ev({ tagName: 'BUTTON' }))).toBe(false);
+    expect(inFormField(ev({ tagName: 'BODY' }))).toBe(false);
+    expect(inFormField(ev(null))).toBe(false);
+    expect(inFormField(ev({}))).toBe(false);
   });
 });

@@ -70,8 +70,9 @@ const DECREASE = new Set(['ArrowDown', 'ArrowLeft']);
 
 /**
  * Arrow keys and space, on the whole window, while `active()` (not while
- * the nails are being adjusted, M7: the arrows nudge a nail then). Returns
- * an unbind function.
+ * the nails are being adjusted, M7: the arrows nudge a nail then), and
+ * not when focus is in a form field (inFormField), whose arrows are its
+ * own. Returns an unbind function.
  */
 export function bindKeyboard(
   target: Window,
@@ -80,7 +81,7 @@ export function bindKeyboard(
   active: () => boolean = () => true,
 ): () => void {
   const down = (e: KeyboardEvent): void => {
-    if (!active()) return;
+    if (!active() || inFormField(e)) return;
     if (e.code === 'Space') {
       holds.set('key', true);
       e.preventDefault();
@@ -105,6 +106,15 @@ export function bindKeyboard(
     target.removeEventListener('keyup', up);
     target.removeEventListener('blur', blur);
   };
+}
+
+/** Form fields that take arrow keys and space themselves (M8's settings: the selects and the volume slider). */
+const FORM_FIELDS = new Set(['INPUT', 'SELECT', 'TEXTAREA']);
+
+/** Whether a key went to a form field, which the handle must leave alone. */
+export function inFormField(e: Event): boolean {
+  const tag = (e.target as { tagName?: unknown } | null)?.tagName;
+  return typeof tag === 'string' && FORM_FIELDS.has(tag);
 }
 
 /**
