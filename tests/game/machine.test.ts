@@ -12,6 +12,8 @@ import {
   enterAttacker,
   enterStart,
   forceJackpot,
+  resetMachine,
+  setJackpotProbability,
   stepMachine,
 } from '../../src/game/machine';
 import { createRng } from '../../src/sim/rng';
@@ -286,5 +288,68 @@ describe('machine: forced jackpot (debug key)', () => {
     expect(m.phase.kind).toBe('jackpot');
     expect(forceJackpot(m)).toBe(false);
     expect(m.forced).toBe(false);
+  });
+});
+
+describe('machine: settings (M8)', () => {
+  it('a new jackpot probability applies to later entries; held spins keep their results', () => {
+    const m = always(0);
+    enterStart(m); // Spins at once on the next step.
+    stepMachine(m);
+    enterStart(m); // Held, drawn as a miss.
+    setJackpotProbability(m, 1);
+    enterStart(m); // Held, drawn as a jackpot.
+    expect(m.jackpotProbability).toBe(1);
+    expect(m.holds.map((h) => h.jackpot)).toEqual([false, true]);
+    expect(m.phase).toMatchObject({ kind: 'spinning', result: { jackpot: false } });
+    setJackpotProbability(m, 0);
+    expect(m.holds.map((h) => h.jackpot)).toEqual([false, true]);
+  });
+
+  it('refuses a probability outside [0, 1], changing nothing', () => {
+    const m = createMachine(createRng(1), { jackpotProbability: 0.25 });
+    for (const p of [-0.1, 1.5, NaN]) {
+      expect(() => setJackpotProbability(m, p)).toThrow(RangeError);
+      expect(m.jackpotProbability).toBe(0.25);
+    }
+  });
+
+  it('resets to a fresh machine mid-jackpot, keeping its odds and rng', () => {
+    const m = createMachine(createRng(9), { jackpotProbability: 0.5 });
+    forceJackpot(m);
+    run(m, 1 + SPIN_STEPS);
+    openFirstRound(m);
+    for (let i = 0; i < HOLD_LIMIT + 2; i++) enterStart(m);
+    enterAttacker(m);
+    forceJackpot(m); // Ignored during a jackpot; set it by hand to check it clears.
+    m.forced = true;
+    expect(attackerOpen(m)).toBe(true);
+    const { rng, holds } = m;
+    resetMachine(m);
+    const fresh = createMachine(createRng(9), { jackpotProbability: 0.5 });
+    // Everything but the rng, which carries on rather than starting over.
+    expect({ ...m, rng: null }).toEqual({ ...fresh, rng: null });
+    expect(attackerOpen(m)).toBe(false);
+    expect(m.rng).toBe(rng);
+    expect(m.holds).toBe(holds);
+    // It plays on as usual afterwards.
+    enterStart(m);
+    run(m, 1 + SPIN_STEPS);
+    expect(m.spins).toBe(1);
+  });
+
+  it('a reset machine with the same rng draws the same as one that carried on', () => {
+    const a = createMachine(createRng(4), { jackpotProbability: 0.3 });
+    const b = createMachine(createRng(4), { jackpotProbability: 0.3 });
+    enterStart(a);
+    enterStart(b);
+    resetMachine(a);
+    // a's queue was cleared; b's still has its spin. The next draws match.
+    b.holds.length = 0;
+    for (let i = 0; i < 3; i++) {
+      enterStart(a);
+      enterStart(b);
+    }
+    expect(a.holds).toEqual(b.holds);
   });
 });

@@ -362,6 +362,7 @@ describe('table', () => {
       table.fire.power = BEST_POWER;
       inPlay(table, 20);
       expect(table.economy).toEqual({
+        startingBalls: 250,
         balls: 250,
         launched: 0,
         entries: { start: 0, out: 0, foul: 0, attacker: 0, tulip: 0 },

@@ -78,7 +78,8 @@ export interface Machine {
   overflow: number;
   /** Rounds finished, over all jackpots. */
   roundsPlayed: number;
-  readonly jackpotProbability: number;
+  /** Chance per spin, drawn at entry: a change (setJackpotProbability) applies to later entries, not held spins. */
+  jackpotProbability: number;
   /** Draws every spin. Nothing else may draw from it, or results would shift. */
   readonly rng: Rng;
 }
@@ -105,6 +106,33 @@ export function createMachine(rng: Rng, options: MachineOptions = {}): Machine {
     jackpotProbability,
     rng,
   };
+}
+
+/**
+ * Change the jackpot odds (M8's settings). Spins already drawn, held or
+ * on the reel, keep their results: the lottery decides at entry. Throws,
+ * and changes nothing, unless p is in [0, 1].
+ */
+export function setJackpotProbability(machine: Machine, p: number): void {
+  checkProbability(p);
+  machine.jackpotProbability = p;
+}
+
+/**
+ * Back to a fresh machine (M8's new game): idle, nothing held or forced,
+ * the reel at 000, every count at 0. The jackpot odds stay, and the rng
+ * carries on from where it is, so a seeded game stays deterministic
+ * through a restart. In place, since the page holds the table's machine.
+ */
+export function resetMachine(machine: Machine): void {
+  machine.phase = IDLE;
+  machine.holds.length = 0;
+  machine.forced = false;
+  machine.shown = [0, 0, 0];
+  machine.spins = 0;
+  machine.jackpots = 0;
+  machine.overflow = 0;
+  machine.roundsPlayed = 0;
 }
 
 /**

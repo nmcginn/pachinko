@@ -14,7 +14,10 @@ import { type Rng, createRng, streamSeed } from '../sim/rng';
 import { type Capture, type World, setGateOpen, stepWorld } from '../sim/world';
 import {
   type Economy,
+  STARTING_BALLS,
+  checkStartingBalls,
   createEconomy,
+  resetEconomy,
   recordEntry,
   returnBalls,
   takeBallForLaunch,
@@ -26,14 +29,17 @@ import {
   createMachine,
   enterAttacker,
   enterStart,
+  resetMachine,
+  setJackpotProbability,
   stepMachine,
 } from './machine';
+import { checkProbability } from './lottery';
 import { enterTulip } from './tulip';
 
 export interface Table {
   /** Replaced, never mutated, when a nail is adjusted (game/adjust.ts). */
   board: Board;
-  /** Replaced, with the board, when a board is imported (replaceBoard). */
+  /** Replaced, with the board, when a board is imported (replaceBoard), and on a new game (newGame). */
   world: World;
   readonly economy: Economy;
   readonly fire: FireControl;
@@ -105,6 +111,35 @@ export function replaceBoard(table: Table, board: Board): number {
   table.board = board;
   table.world = createBoardWorld(board);
   return fromTray;
+}
+
+export interface NewGameOptions {
+  /** Balls in the tray. Default STARTING_BALLS. */
+  readonly startingBalls?: number;
+  /** Jackpot probability per spin from now on. Default: the machine's current one. */
+  readonly jackpotProbability?: number;
+}
+
+/**
+ * Start a new game on the same table (M8's settings): the balls in play
+ * are cleared away (they belonged to the old game, so none go back to the
+ * tray), the tray holds `startingBalls`, and the machine starts afresh:
+ * idle, no holds, no jackpot, every count at 0. The board stays as it is,
+ * nail adjustments and all; its world is rebuilt, gates closed. The
+ * handle keeps its power and the rngs carry on, so the same seed and the
+ * same inputs, restart included, still give the same game. Throws, and
+ * changes nothing, if an option is out of range.
+ */
+export function newGame(table: Table, options: NewGameOptions = {}): void {
+  const startingBalls = options.startingBalls ?? STARTING_BALLS;
+  const p = options.jackpotProbability ?? table.machine.jackpotProbability;
+  checkStartingBalls(startingBalls);
+  checkProbability(p);
+  resetEconomy(table.economy, startingBalls);
+  resetMachine(table.machine);
+  setJackpotProbability(table.machine, p);
+  table.freeBalls.clear();
+  table.world = createBoardWorld(table.board);
 }
 
 /**
