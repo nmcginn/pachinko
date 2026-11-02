@@ -37,6 +37,7 @@ import { createDebugOverlay } from './render/debug';
 import { collectGlints, createGlints } from './render/glints';
 import { createHud } from './render/hud';
 import { type Rect, freeArea } from './render/layout';
+import { type Scene, gateKey, glintsLive, needsRedraw } from './render/redraw';
 import { createReel } from './render/reel';
 import { createStatsPanel } from './render/stats';
 import { parseBoard } from './sim/board';
@@ -319,6 +320,8 @@ settingsPanel = bindSettings(
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const flash = createFlash(byId('flash', HTMLElement), () => reducedMotion.matches);
 
+/** What the canvas showed when last drawn, or null before the first frame. */
+let drawnScene: Scene | null = null;
 const loop = createLoop(
   {
     requestFrame: (cb) => requestAnimationFrame(cb),
@@ -339,18 +342,37 @@ const loop = createLoop(
       const frameCues = drainCues(cues);
       sound.play(frameCues);
       haptics?.play(frameCues);
-      const bv = drawBoard(view, table.board, table.world.gates, currentBoardArea());
-      boardView = bv;
-      // For tests: where the board is drawn (px = ox + x·scale, py = oy − y·scale).
-      const where = `${bv.scale},${bv.ox},${bv.oy}`;
-      if (canvas.dataset['boardView'] !== where) canvas.dataset['boardView'] = where;
-      const glinting = drawGlints(view, bv, table.board, glints, table.world.steps);
-      // For tests: nails glinting in this frame. Only written when it changes.
-      if (canvas.dataset['glints'] !== String(glinting))
-        canvas.dataset['glints'] = String(glinting);
-      // Paused balls are drawn where they are, not part-way through a step.
-      drawBalls(view, bv, table.world.balls, playing() ? frame.alpha : 1);
-      drawAdjust(view, bv, table.board, adjust);
+      // The canvas is drawn only when what it shows has changed, or while
+      // a ball or a glint moves on it (render/redraw.ts): an idle board
+      // isn't rastered again every frame.
+      const scene: Scene = {
+        backingWidth: canvas.width,
+        backingHeight: canvas.height,
+        cssWidth: view.cssWidth,
+        cssHeight: view.cssHeight,
+        area: currentBoardArea(),
+        board: table.board,
+        gates: gateKey(table.world.gates),
+        balls: table.world.balls.length,
+        glinting: glintsLive(glints, table.world.steps),
+        editing: adjust.editing,
+        selected: adjust.selected,
+      };
+      if (needsRedraw(drawnScene, scene)) {
+        drawnScene = scene;
+        const bv = drawBoard(view, table.board, table.world.gates, scene.area);
+        boardView = bv;
+        // For tests: where the board is drawn (px = ox + x·scale, py = oy − y·scale).
+        const where = `${bv.scale},${bv.ox},${bv.oy}`;
+        if (canvas.dataset['boardView'] !== where) canvas.dataset['boardView'] = where;
+        const glinting = drawGlints(view, bv, table.board, glints, table.world.steps);
+        // For tests: nails glinting in this frame. Only written when it changes.
+        if (canvas.dataset['glints'] !== String(glinting))
+          canvas.dataset['glints'] = String(glinting);
+        // Paused balls are drawn where they are, not part-way through a step.
+        drawBalls(view, bv, table.world.balls, playing() ? frame.alpha : 1);
+        drawAdjust(view, bv, table.board, adjust);
+      }
       hud.update(table.economy, table.fire, table.world.balls.length);
       reel.update(table.machine);
       flash.update(table.machine);
@@ -360,4 +382,9 @@ const loop = createLoop(
   },
 );
 
+// Draw afresh after anything that may have cleared the canvas behind the
+// scene's back: the browser dropping and restoring its context (mobile
+// browsers do, for a backgrounded tab), or the tab coming back into view.
+canvas.addEventListener('contextrestored', () => (drawnScene = null));
+document.addEventListener('visibilitychange', () => (drawnScene = null));
 bindVisibility(loop, document);
