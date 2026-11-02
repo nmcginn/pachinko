@@ -82,3 +82,23 @@ jobs:
             console.log(`best power: ${s.best}`);
             process.exit(s.best === Number(process.env.BEST_POWER) ? 0 : 1);
           '
+
+  lighthouse:
+    # M8 acceptance: Lighthouse performance ≥ 90 on the production build.
+    # tools/lighthouse.ts serves dist/ and judges the median of several
+    # runs, since one run on a shared runner can lose points to noise.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Mobile (Lighthouse's throttled phone), median of 5
+        run: npx tsx tools/lighthouse.ts --preset mobile --runs 5 --threshold 90
+      - name: Desktop, median of 3
+        run: npx tsx tools/lighthouse.ts --preset desktop --runs 3 --threshold 90
