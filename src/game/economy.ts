@@ -23,6 +23,8 @@ const PAYOUT: Record<PocketKind, number> = {
 };
 
 export interface Economy {
+  /** Balls this game started with (createEconomy, resetEconomy). */
+  startingBalls: number;
   /** Balls in the tray, available to launch. */
   balls: number;
   /** Balls launched since the start. */
@@ -33,11 +35,17 @@ export interface Economy {
   paidOut: number;
 }
 
-export function createEconomy(startingBalls = STARTING_BALLS): Economy {
-  if (!(Number.isInteger(startingBalls) && startingBalls >= 0)) {
-    throw new RangeError(`starting balls must be a whole number ≥ 0, got ${startingBalls}`);
+/** Throws unless n is a whole number ≥ 0. */
+export function checkStartingBalls(n: number): void {
+  if (!(Number.isInteger(n) && n >= 0)) {
+    throw new RangeError(`starting balls must be a whole number ≥ 0, got ${n}`);
   }
+}
+
+export function createEconomy(startingBalls = STARTING_BALLS): Economy {
+  checkStartingBalls(startingBalls);
   return {
+    startingBalls,
     balls: startingBalls,
     launched: 0,
     entries: { start: 0, out: 0, foul: 0, attacker: 0, tulip: 0 },
@@ -79,4 +87,19 @@ export function returnBalls(economy: Economy, count: number): void {
   }
   economy.balls += count;
   economy.launched -= count;
+}
+
+/**
+ * Start the tray again (M8's new game): `startingBalls` in it, nothing
+ * launched, no entries, nothing paid. In place, since the page holds the
+ * table's economy. Throws, and changes nothing, unless `startingBalls` is a
+ * whole number ≥ 0.
+ */
+export function resetEconomy(economy: Economy, startingBalls: number): void {
+  checkStartingBalls(startingBalls);
+  economy.startingBalls = startingBalls;
+  economy.balls = startingBalls;
+  economy.launched = 0;
+  economy.paidOut = 0;
+  for (const kind of Object.keys(economy.entries) as PocketKind[]) economy.entries[kind] = 0;
 }

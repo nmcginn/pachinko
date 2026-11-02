@@ -1,6 +1,7 @@
 // M6: haptics on a phone. An init script swaps navigator.vibrate for a
 // recorder (headless Chromium has no motor), and the phone tests emulate a
 // touch screen, which is what the vibration toggle and the buzzes need.
+// The toggle lives in the settings panel (M8), which pauses play while open.
 
 import { devices, expect, test, type Page } from '@playwright/test';
 
@@ -41,13 +42,19 @@ test.describe('on a phone', () => {
     // Seed 54: the first shot at power 0.2 enters the start pocket.
     await page.goto('/?seed=54');
     await expect(page.locator('#balls')).toHaveAttribute('data-balls', '250');
+
+    // Untouched for a while: nothing buzzes.
+    await page.waitForTimeout(1500);
+    expect(await vibrations(page)).toEqual([]);
+
+    // The toggle is in the settings, on.
+    await page.locator('#settings').tap();
     const toggle = page.locator('#vibration');
     await expect(toggle).toBeVisible();
     await expect(toggle).toHaveText('Vibration on');
     await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-
-    // Untouched for a while: nothing buzzes.
-    await page.waitForTimeout(1500);
+    await page.locator('#settings-done').tap();
+    // Opening the panel buzzes for nothing.
     expect(await vibrations(page)).toEqual([]);
 
     await fireAtBestPower(page);
@@ -60,14 +67,16 @@ test.describe('on a phone', () => {
 
   test('the toggle switches it off, and the choice survives a reload', async ({ page }) => {
     await page.goto('/?seed=54');
+    await page.locator('#settings').tap();
     const toggle = page.locator('#vibration');
     await expect(toggle).toBeVisible();
-    // A tap on the button is the first interaction and switches it off at once.
+    // A tap on the button switches it off at once.
     await toggle.tap();
     await expect(toggle).toHaveText('Vibration off');
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');
     // Turning off stops any pattern in progress, which is a vibrate(0).
     expect(await vibrations(page)).toEqual(['0']);
+    await page.locator('#settings-done').tap();
 
     await fireAtBestPower(page);
     // Long enough for the start entry and the whole spin.
@@ -76,6 +85,7 @@ test.describe('on a phone', () => {
     expect(await vibrations(page)).toEqual(['0']);
 
     await page.reload();
+    await page.locator('#settings').tap();
     await expect(page.locator('#vibration')).toHaveText('Vibration off');
     // The V key turns it back on.
     await page.keyboard.press('KeyV');
@@ -86,7 +96,12 @@ test.describe('on a phone', () => {
 test('on a desktop: no toggle and no buzzing', async ({ page }) => {
   await page.goto('/?seed=54');
   await expect(page.locator('#balls')).toHaveAttribute('data-balls', '250');
+  // Not in the settings either.
+  await page.locator('#settings').click();
+  await expect(page.locator('#settings-panel')).toBeVisible();
   await expect(page.locator('#vibration')).toBeHidden();
+  await expect(page.locator('#setting-vibration')).toBeHidden();
+  await page.locator('#settings-done').click();
   await fireAtBestPower(page);
   await expect(page.locator('#reel')).toHaveAttribute('data-spins', '1', { timeout: 15_000 });
   await page.keyboard.up('Space');

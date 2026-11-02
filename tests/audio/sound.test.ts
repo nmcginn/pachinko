@@ -68,7 +68,7 @@ function fakeContext(state: AudioContextState = 'running') {
   return { ctx, started, gains };
 }
 
-function setup(options: { muted?: boolean; state?: AudioContextState } = {}) {
+function setup(options: { muted?: boolean; volume?: number; state?: AudioContextState } = {}) {
   const fake = fakeContext(options.state);
   let created = 0;
   const sound = createSound(
@@ -78,7 +78,10 @@ function setup(options: { muted?: boolean; state?: AudioContextState } = {}) {
         return fake.ctx as unknown as AudioContext;
       },
     },
-    { muted: options.muted ?? false },
+    {
+      muted: options.muted ?? false,
+      ...(options.volume === undefined ? {} : { volume: options.volume }),
+    },
   );
   return { sound, fake, created: () => created };
 }
@@ -147,6 +150,56 @@ describe('sound', () => {
     expect(fake.gains[0]?.calls.at(-1)).toEqual(['set', 0, 2]);
     sound.play(EVERY_CUE);
     expect(fake.started.length).toBe(before);
+  });
+
+  it('scales the master level by the volume (M8 settings), from the start and as it changes', () => {
+    const { sound, fake } = setup({ volume: 0.4 });
+    expect(sound.volume).toBe(0.4);
+    sound.unlock();
+    expect(fake.gains[0]?.calls).toEqual([['set', MASTER_GAIN * 0.4, 2]]);
+    sound.setVolume(0.7);
+    expect(sound.volume).toBe(0.7);
+    expect(fake.gains[0]?.calls.at(-1)).toEqual(['set', MASTER_GAIN * 0.7, 2]);
+    // Muting silences it; unmuting brings back the volume, not full level.
+    sound.setMuted(true);
+    expect(fake.gains[0]?.calls.at(-1)).toEqual(['set', 0, 2]);
+    sound.setVolume(0.2);
+    expect(fake.gains[0]?.calls.at(-1)).toEqual(['set', 0, 2]);
+    sound.setMuted(false);
+    expect(fake.gains[0]?.calls.at(-1)).toEqual(['set', MASTER_GAIN * 0.2, 2]);
+  });
+
+  it('defaults to full volume, and remembers a volume set before unlocking', () => {
+    const { sound, fake } = setup();
+    expect(sound.volume).toBe(1);
+    sound.setVolume(0.5);
+    expect(fake.gains).toEqual([]);
+    sound.unlock();
+    expect(fake.gains[0]?.calls).toEqual([['set', MASTER_GAIN * 0.5, 2]]);
+  });
+
+  it('plays nothing at volume 0, and again once turned up', () => {
+    const { sound, fake } = setup({ volume: 0 });
+    sound.unlock();
+    sound.play(EVERY_CUE);
+    expect(fake.started).toEqual([]);
+    sound.setVolume(0.1);
+    sound.play([{ kind: 'reel-tick' }]);
+    expect(fake.started.length).toBe(1);
+  });
+
+  it('clamps the volume to [0, 1] and refuses a non-number', () => {
+    const { sound } = setup();
+    sound.setVolume(3);
+    expect(sound.volume).toBe(1);
+    sound.setVolume(-1);
+    expect(sound.volume).toBe(0);
+    sound.setVolume(0.5);
+    for (const v of [NaN, Infinity]) {
+      expect(() => sound.setVolume(v)).toThrow(RangeError);
+      expect(sound.volume).toBe(0.5);
+    }
+    expect(() => setup({ volume: NaN })).toThrow(RangeError);
   });
 
   it('plays nothing for no cues, and a harder strike rattles louder', () => {

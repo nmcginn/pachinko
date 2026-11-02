@@ -37,21 +37,39 @@ export interface Sound {
   /** True once the first interaction has created the audio context. */
   readonly unlocked: boolean;
   readonly muted: boolean;
+  /** Volume, 0 to 1, scaling MASTER_GAIN (M8's settings). Separate from mute, so unmuting restores it. */
+  readonly volume: number;
   /** Create the audio context (once) and resume it. Call from a user gesture. */
   unlock(): void;
   setMuted(muted: boolean): void;
-  /** Sound the cues now. Dropped while locked or muted. */
+  /** Set the volume, clamped to [0, 1]. Throws on a value that isn't a finite number. */
+  setVolume(volume: number): void;
+  /** Sound the cues now. Dropped while locked, muted, or at volume 0. */
   play(cues: readonly Cue[]): void;
 }
 
-export function createSound(host: AudioHost, options: { muted?: boolean } = {}): Sound {
+export interface SoundOptions {
+  /** Default false. */
+  readonly muted?: boolean;
+  /** Default 1. */
+  readonly volume?: number;
+}
+
+function clampVolume(v: number): number {
+  if (!Number.isFinite(v)) throw new RangeError(`volume must be a finite number, got ${v}`);
+  return Math.min(1, Math.max(0, v));
+}
+
+export function createSound(host: AudioHost, options: SoundOptions = {}): Sound {
   let ctx: AudioContext | null = null;
   let master: GainNode | null = null;
   let noise: AudioBuffer | null = null;
   let muted = options.muted ?? false;
+  let volume = clampVolume(options.volume ?? 1);
 
-  const applyMute = (): void => {
-    if (ctx && master) master.gain.setValueAtTime(muted ? 0 : MASTER_GAIN, ctx.currentTime);
+  const applyLevel = (): void => {
+    if (ctx && master)
+      master.gain.setValueAtTime(muted ? 0 : MASTER_GAIN * volume, ctx.currentTime);
   };
 
   return {
@@ -61,22 +79,29 @@ export function createSound(host: AudioHost, options: { muted?: boolean } = {}):
     get muted() {
       return muted;
     },
+    get volume() {
+      return volume;
+    },
     unlock() {
       if (!ctx) {
         ctx = host.createContext();
         master = ctx.createGain();
         master.connect(ctx.destination);
         noise = makeNoise(ctx);
-        applyMute();
+        applyLevel();
       }
       if (ctx.state === 'suspended') void ctx.resume();
     },
     setMuted(value) {
       muted = value;
-      applyMute();
+      applyLevel();
+    },
+    setVolume(value) {
+      volume = clampVolume(value);
+      applyLevel();
     },
     play(cues) {
-      if (!ctx || !master || !noise || muted || ctx.state !== 'running') return;
+      if (!ctx || !master || !noise || muted || volume === 0 || ctx.state !== 'running') return;
       const voice = { ctx, out: master, noise, t: ctx.currentTime };
       for (const cue of cues) {
         switch (cue.kind) {

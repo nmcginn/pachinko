@@ -6,6 +6,7 @@ import {
   TULIP_PAYOUT,
   createEconomy,
   recordEntry,
+  resetEconomy,
   takeBallForLaunch,
 } from '../../src/game/economy';
 
@@ -13,6 +14,7 @@ describe('economy', () => {
   it('starts with the classic ¥1000 rental of 250 balls', () => {
     expect(STARTING_BALLS).toBe(250);
     expect(createEconomy()).toEqual({
+      startingBalls: 250,
       balls: 250,
       launched: 0,
       entries: { start: 0, out: 0, foul: 0, attacker: 0, tulip: 0 },
@@ -100,5 +102,39 @@ describe('economy', () => {
     expect(() => createEconomy(-1)).toThrow(RangeError);
     expect(() => createEconomy(2.5)).toThrow(RangeError);
     expect(() => createEconomy(NaN)).toThrow(RangeError);
+  });
+
+  it('remembers what it started with', () => {
+    expect(createEconomy(500).startingBalls).toBe(500);
+    expect(createEconomy(0).startingBalls).toBe(0);
+  });
+
+  it('resets in place for a new game: a fresh tray, no tallies', () => {
+    const e = createEconomy(10);
+    takeBallForLaunch(e);
+    takeBallForLaunch(e);
+    recordEntry(e, 'start');
+    recordEntry(e, 'out');
+    recordEntry(e, 'foul');
+    recordEntry(e, 'attacker');
+    recordEntry(e, 'tulip');
+    const { entries } = e;
+    resetEconomy(e, 1250);
+    expect(e).toEqual(createEconomy(1250));
+    // The same objects: the page and the cue tracker hold them.
+    expect(e.entries).toBe(entries);
+    resetEconomy(e, 0);
+    expect(e).toEqual(createEconomy(0));
+    expect(takeBallForLaunch(e)).toBe(false);
+  });
+
+  it('refuses a reset to anything but a whole number ≥ 0, changing nothing', () => {
+    const e = createEconomy(10);
+    takeBallForLaunch(e);
+    const before = structuredClone(e);
+    for (const n of [-1, 2.5, NaN, Infinity]) {
+      expect(() => resetEconomy(e, n)).toThrow(RangeError);
+      expect(e).toEqual(before);
+    }
   });
 });

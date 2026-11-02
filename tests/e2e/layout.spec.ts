@@ -1,8 +1,8 @@
 // M8: responsive layout, portrait first. At phone, landscape-phone and
-// desktop sizes, in play and while adjusting nails, the board is fitted
-// clear of every control, the launch handle sits under the right thumb in
-// portrait, the buttons are big enough to tap, and the debug overlay stays
-// out of the way unless asked for.
+// desktop sizes, in play, in the settings and while adjusting nails, the
+// board is fitted clear of every control, the launch handle sits under the
+// right thumb in portrait, the buttons are big enough to tap, and the debug
+// overlay stays out of the way unless asked for.
 
 import { expect, test, type Page } from '@playwright/test';
 import { boardView, clickBoard } from './boardview';
@@ -22,7 +22,11 @@ interface Box {
 /** Every control showing over the canvas: #ui's children and their buttons, and the debug overlay. */
 const controls = (page: Page): Promise<Box[]> =>
   page.evaluate(() => {
-    const els = [...document.querySelectorAll<HTMLElement>('#ui > *, #controls > *, #debug')];
+    const els = [
+      ...document.querySelectorAll<HTMLElement>(
+        '#ui > *, #controls > *, #settings-panel *, #debug',
+      ),
+    ];
     return els
       .map((el) => {
         const r = el.getBoundingClientRect();
@@ -64,13 +68,61 @@ async function expectBoardClear(page: Page, minWidthPx: number): Promise<Box> {
 }
 
 const SIZES = [
-  // name, viewport, phone?, smallest board width in play, and while editing
-  { name: 'phone 390×844', width: 390, height: 844, phone: true, play: 340, edit: 340 },
-  { name: 'small phone 375×667', width: 375, height: 667, phone: true, play: 320, edit: 260 },
-  { name: 'narrow phone 320×568', width: 320, height: 568, phone: true, play: 260, edit: 180 },
-  { name: 'phone landscape 844×390', width: 844, height: 390, phone: true, play: 320, edit: 240 },
-  { name: 'narrow window 900×700', width: 900, height: 700, phone: false, play: 560, edit: 380 },
-  { name: 'desktop 1280×800', width: 1280, height: 800, phone: false, play: 700, edit: 640 },
+  // name, viewport, phone?, smallest board width in play, while editing, and with the settings open
+  {
+    name: 'phone 390×844',
+    width: 390,
+    height: 844,
+    phone: true,
+    play: 340,
+    edit: 340,
+    settings: 330,
+  },
+  {
+    name: 'small phone 375×667',
+    width: 375,
+    height: 667,
+    phone: true,
+    play: 320,
+    edit: 260,
+    settings: 170,
+  },
+  {
+    name: 'narrow phone 320×568',
+    width: 320,
+    height: 568,
+    phone: true,
+    play: 260,
+    edit: 180,
+    settings: 110,
+  },
+  {
+    name: 'phone landscape 844×390',
+    width: 844,
+    height: 390,
+    phone: true,
+    play: 320,
+    edit: 240,
+    settings: 320,
+  },
+  {
+    name: 'narrow window 900×700',
+    width: 900,
+    height: 700,
+    phone: false,
+    play: 560,
+    edit: 380,
+    settings: 480,
+  },
+  {
+    name: 'desktop 1280×800',
+    width: 1280,
+    height: 800,
+    phone: false,
+    play: 700,
+    edit: 640,
+    settings: 700,
+  },
 ] as const;
 
 for (const s of SIZES) {
@@ -81,17 +133,43 @@ for (const s of SIZES) {
       isMobile: s.phone,
     });
 
-    test('no control covers the board, in play or while adjusting nails', async ({ page }) => {
+    test('no control covers the board, in play, in the settings, or while adjusting nails', async ({
+      page,
+    }) => {
       await page.goto('/?seed=54');
       await expect(page.locator('#balls')).toHaveAttribute('data-balls', '250');
       await expectBoardClear(page, s.play);
 
       // Tap targets: every button and the handle at least 44 px tall.
-      for (const id of ['mute', 'adjust', 'handle']) {
+      for (const id of ['mute', 'adjust', 'settings', 'handle']) {
         const box = await page.locator(`#${id}`).boundingBox();
         expect(box?.height, id).toBeGreaterThanOrEqual(44);
       }
-      if (s.phone) await expect(page.locator('#vibration')).toBeVisible();
+
+      // The settings: the board shrinks to fit round the panel (play is
+      // paused), and every setting can be reached and tapped.
+      await page.locator('#settings').click();
+      await expect(page.locator('#settings-panel')).toBeVisible();
+      await expect(page.locator('#handle')).toBeHidden();
+      await expectBoardClear(page, s.settings);
+      const settingIds = ['setting-odds', 'setting-balls', 'setting-volume', 'new-game'];
+      settingIds.push('settings-done', 'settings', ...(s.phone ? ['vibration'] : []));
+      for (const id of settingIds) {
+        const el = page.locator(`#${id}`);
+        await el.scrollIntoViewIfNeeded();
+        const box = await el.boundingBox();
+        expect(box, id).not.toBeNull();
+        if (!box) continue;
+        expect(box.height, id).toBeGreaterThanOrEqual(44);
+        expect(box.y, id).toBeGreaterThanOrEqual(0);
+        expect(box.y + box.height, id).toBeLessThanOrEqual(s.height);
+        expect(box.x, id).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width, id).toBeLessThanOrEqual(s.width);
+      }
+      await page.locator('#settings-done').click();
+      await expect(page.locator('#settings-panel')).toBeHidden();
+      await expect(page.locator('#handle')).toBeVisible();
+      await expectBoardClear(page, s.play);
 
       if (s.height > s.width) {
         // One-handed: the handle at the bottom right, under the right thumb.

@@ -10,6 +10,7 @@ import { collectCues, createCueTracker, drainCues } from './audio/cues';
 import { bindUnlock, createSound } from './audio/sound';
 import { createAdjust } from './game/adjust';
 import { createLiveStats, measure, stopMeasuring } from './game/livestats';
+import { jackpotProbability } from './game/settings';
 import { createTable, stepTable } from './game/table';
 import { createHaptics } from './haptics/haptics';
 import { bindAdjust } from './input/adjust';
@@ -17,6 +18,14 @@ import { bindBoardFile, browserDownloads } from './input/boardfile';
 import { bindDebugKeys, bindDebugToggle } from './input/debug';
 import { bindDial, bindKeyboard, createHolds } from './input/launcher';
 import { bindMute, loadMuted } from './input/mute';
+import {
+  BALL_CHOICES,
+  ODDS_CHOICES,
+  type SettingsPanel,
+  bindSettings,
+  fillSelect,
+  loadSettings,
+} from './input/settings';
 import { bindVibration, hapticsSupported, loadVibration } from './input/vibration';
 import { bindVisibility, createClock, createLoop } from './loop';
 import { createAdjustPanel, drawAdjust } from './render/adjust';
@@ -90,9 +99,16 @@ function pickInPlay(): number {
   return Number.isInteger(n) && n >= 0 && n <= MAX_IN_PLAY ? n : 0;
 }
 
+// Settings (M8): remembered in localStorage when the browser allows it.
+// `storage` is a getter because reading `localStorage` itself can throw.
+const storage = (): Storage => localStorage;
+const initialSettings = loadSettings(storage);
+
 const table = createTable(parseBoard(classicBoard), {
   seed: pickSeed(),
   keepInPlay: pickInPlay(),
+  startingBalls: initialSettings.startingBalls,
+  jackpotProbability: jackpotProbability(initialSettings.jackpotOdds),
 });
 
 // The debug overlay is off for players: `?debug` (or `?inplay`, which is
@@ -131,7 +147,9 @@ bindDebugToggle(window, debugEl, relayout);
 // Nail adjustment (M7). While editing, the table isn't stepped, and the
 // handle's keys and dial do nothing: the arrows nudge or bend the selected nail.
 const adjust = createAdjust(table);
-const playing = () => !adjust.editing;
+/** The settings panel (M8), bound further down once the sound exists. Play pauses while it is open. */
+let settingsPanel: SettingsPanel | null = null;
+const playing = () => !adjust.editing && !settingsPanel?.open;
 const adjustPanel = createAdjustPanel({
   toggle: byId('adjust', HTMLButtonElement),
   panel: byId('adjust-panel', HTMLElement),
@@ -198,6 +216,7 @@ bindAdjust(
   table,
   () => boardView,
   () => {
+    if (adjust.editing) settingsPanel?.setOpen(false);
     adjustPanel.update(adjust, table.board);
     remeasure();
     relayout();
@@ -232,10 +251,9 @@ bindDial(byId('handle', HTMLElement), table.fire, holds, playing);
 bindDebugKeys(window, table.machine);
 
 // Sound starts on the first interaction, never before (bindUnlock).
-const storage = (): Storage => localStorage;
 const sound = createSound(
   { createContext: () => new AudioContext() },
-  { muted: loadMuted(storage) },
+  { muted: loadMuted(storage), volume: initialSettings.volume },
 );
 bindUnlock(window, sound);
 bindMute(window, byId('mute', HTMLButtonElement), sound, storage);
@@ -256,8 +274,47 @@ const haptics = hapticsSupported(navigator, window.matchMedia('(pointer: coarse)
     )
   : null;
 if (haptics) bindVibration(window, byId('vibration', HTMLButtonElement), haptics, storage);
-const cues = createCueTracker(table);
+let cues = createCueTracker(table);
 let glints = createGlints(table.world);
+
+// The settings panel (M8). It shares the adjust panel's place on screen, so
+// the two never show together: entering edit mode closes it, and its
+// button is hidden while editing. A new game resets the tray and the
+// machine and clears the balls in play, so what is kept per game (the
+// sound cues, counted from the tray's tallies) and per world (the glints)
+// starts again with it.
+const oddsSelect = byId('setting-odds', HTMLSelectElement);
+const ballsSelect = byId('setting-balls', HTMLSelectElement);
+fillSelect(document, oddsSelect, ODDS_CHOICES);
+fillSelect(document, ballsSelect, BALL_CHOICES);
+settingsPanel = bindSettings(
+  window,
+  {
+    toggle: byId('settings', HTMLButtonElement),
+    panel: byId('settings-panel', HTMLElement),
+    odds: oddsSelect,
+    balls: ballsSelect,
+    volume: byId('setting-volume', HTMLInputElement),
+    volumeValue: byId('setting-volume-value', HTMLOutputElement),
+    note: byId('settings-note', HTMLElement),
+    newGame: byId('new-game', HTMLButtonElement),
+    done: byId('settings-done', HTMLButtonElement),
+  },
+  initialSettings,
+  {
+    table,
+    sound,
+    storage,
+    restarted: () => {
+      cues = createCueTracker(table);
+      glints = createGlints(table.world);
+    },
+    toggled: (open) => {
+      document.body.classList.toggle('settings-open', open);
+      relayout();
+    },
+  },
+);
 // No screen flash for players who ask for less motion (M8 builds on this).
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const flash = createFlash(byId('flash', HTMLElement), () => reducedMotion.matches);
@@ -271,9 +328,9 @@ const loop = createLoop(
   createClock(SIM_STEP_S, MAX_FRAME_S),
   {
     step: () => {
-      // Paused while adjusting nails: the clock runs on, so nothing piles
-      // up to catch up on afterwards.
-      if (adjust.editing) return;
+      // Paused while adjusting nails or in the settings: the clock runs on,
+      // so nothing piles up to catch up on afterwards.
+      if (!playing()) return;
       stepTable(table);
       collectCues(cues, table);
       collectGlints(glints, table.world);
@@ -292,7 +349,7 @@ const loop = createLoop(
       if (canvas.dataset['glints'] !== String(glinting))
         canvas.dataset['glints'] = String(glinting);
       // Paused balls are drawn where they are, not part-way through a step.
-      drawBalls(view, bv, table.world.balls, adjust.editing ? 1 : frame.alpha);
+      drawBalls(view, bv, table.world.balls, playing() ? frame.alpha : 1);
       drawAdjust(view, bv, table.board, adjust);
       hud.update(table.economy, table.fire, table.world.balls.length);
       reel.update(table.machine);
