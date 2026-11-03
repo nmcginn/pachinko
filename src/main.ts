@@ -157,6 +157,7 @@ const adjustPanel = createAdjustPanel({
   selection: byId('adjust-selection', HTMLElement),
   problem: byId('adjust-problem', HTMLElement),
   root: document.body,
+  selectMode: byId('mode-select', HTMLButtonElement),
   nudgeMode: byId('mode-nudge', HTMLButtonElement),
   bendMode: byId('mode-bend', HTMLButtonElement),
   arrows: {
@@ -210,6 +211,7 @@ bindAdjust(
     up: byId('nudge-up', HTMLButtonElement),
     down: byId('nudge-down', HTMLButtonElement),
     reset: byId('nudge-reset', HTMLButtonElement),
+    selectMode: byId('mode-select', HTMLButtonElement),
     nudgeMode: byId('mode-nudge', HTMLButtonElement),
     bendMode: byId('mode-bend', HTMLButtonElement),
   },

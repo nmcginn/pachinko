@@ -5,6 +5,12 @@
 // lean it 0.5° (Shift: 2.5°). B or the panel's Nudge and Bend buttons
 // switch between the two. The launch handle's keys and dial do nothing
 // meanwhile (see bindKeyboard).
+//
+// Select mode (M8, for the keyboard and for one thumb on a small screen):
+// S or the panel's Select button makes the arrows move the selection to the
+// next nail that way instead (game/adjust.ts selectToward), so a nail can
+// be picked without a pointer or a precise tap. N or Nudge goes back to
+// nudging, and B to bending (from select mode B bends; from bend, nudges).
 
 import {
   type Adjust,
@@ -13,6 +19,7 @@ import {
   nudgeSelected,
   resetSelected,
   selectNailAt,
+  selectToward,
   setEditing,
   setMode,
 } from '../game/adjust';
@@ -22,6 +29,10 @@ import { type BoardView, boardPointM } from '../render/board';
 export const ADJUST_CODE = 'KeyE';
 /** Switches the arrows between nudging and bending, in edit mode. */
 export const MODE_CODE = 'KeyB';
+/** Makes the arrows select nails, in edit mode. */
+export const SELECT_CODE = 'KeyS';
+/** Makes the arrows nudge, in edit mode. */
+export const NUDGE_CODE = 'KeyN';
 /** A click or tap selects the nearest nail within this many CSS pixels. */
 export const PICK_REACH_PX = 14;
 /** Steps per Shift+arrow: 1 mm. */
@@ -38,11 +49,15 @@ export type AdjustAction =
   | { readonly kind: 'toggle' }
   | { readonly kind: 'leave' }
   | { readonly kind: 'mode' }
+  | { readonly kind: 'use'; readonly mode: AdjustMode }
   | { readonly kind: 'arrow'; readonly dx: number; readonly dy: number; readonly big: boolean };
 
-/** Steps an arrow takes in a mode: one, or with Shift ten nudges (1 mm) or five bends (2.5°). */
+/**
+ * Steps an arrow takes in a mode: one, or with Shift ten nudges (1 mm) or
+ * five bends (2.5°). Selecting always goes one nail.
+ */
 export function arrowSteps(mode: AdjustMode, big: boolean): number {
-  if (!big) return 1;
+  if (!big || mode === 'select') return 1;
   return mode === 'nudge' ? BIG_NUDGE_STEPS : BIG_LEAN_STEPS;
 }
 
@@ -56,9 +71,10 @@ const ARROWS: Record<string, readonly [number, number]> = {
 /**
  * What a key press does to nail adjustment, or null for nothing. E toggles
  * edit mode (not on key repeat, nor with Ctrl, Cmd or Alt); in edit mode,
- * Escape leaves it, B switches between nudging and bending (not on
- * repeat), and the arrows move the nail, repeating while held, further
- * with Shift. Board y is up, so ArrowUp is +y.
+ * Escape leaves it, B switches between nudging and bending and S and N
+ * make the arrows select or nudge (none of them on repeat), and the arrows
+ * select or move the nail, repeating while held, further with Shift. Board
+ * y is up, so ArrowUp is +y.
  */
 export function adjustKeyAction(
   e: Pick<KeyboardEvent, 'code' | 'key' | 'repeat' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey'>,
@@ -69,6 +85,8 @@ export function adjustKeyAction(
   if (!editing) return null;
   if (e.key === 'Escape') return { kind: 'leave' };
   if (e.code === MODE_CODE) return e.repeat ? null : { kind: 'mode' };
+  if (e.code === SELECT_CODE) return e.repeat ? null : { kind: 'use', mode: 'select' };
+  if (e.code === NUDGE_CODE) return e.repeat ? null : { kind: 'use', mode: 'nudge' };
   const arrow = ARROWS[e.key];
   if (!arrow) return null;
   return { kind: 'arrow', dx: arrow[0], dy: arrow[1], big: e.shiftKey };
@@ -86,7 +104,8 @@ export interface AdjustElements {
   readonly down: HTMLElement;
   /** Puts the selected nail back where the board loaded it. */
   readonly reset: HTMLElement;
-  /** Make the arrows nudge, or bend. */
+  /** Make the arrows select, nudge, or bend. */
+  readonly selectMode: HTMLElement;
   readonly nudgeMode: HTMLElement;
   readonly bendMode: HTMLElement;
 }
@@ -108,10 +127,12 @@ export function bindAdjust(
   const apply = (action: AdjustAction): void => {
     if (action.kind === 'toggle') setEditing(adjust, !adjust.editing);
     else if (action.kind === 'leave') setEditing(adjust, false);
-    else if (action.kind === 'mode') setMode(adjust, adjust.mode === 'nudge' ? 'bend' : 'nudge');
+    else if (action.kind === 'mode') setMode(adjust, adjust.mode === 'bend' ? 'nudge' : 'bend');
+    else if (action.kind === 'use') setMode(adjust, action.mode);
     else {
       const n = arrowSteps(adjust.mode, action.big);
-      if (adjust.mode === 'nudge') nudgeSelected(adjust, table, action.dx * n, action.dy * n);
+      if (adjust.mode === 'select') selectToward(adjust, table, action.dx, action.dy);
+      else if (adjust.mode === 'nudge') nudgeSelected(adjust, table, action.dx * n, action.dy * n);
       else leanSelected(adjust, table, action.dx * n, action.dy * n);
     }
     changed();
@@ -138,20 +159,9 @@ export function bindAdjust(
     [els.right, () => apply({ kind: 'arrow', dx: 1, dy: 0, big: false })],
     [els.up, () => apply({ kind: 'arrow', dx: 0, dy: 1, big: false })],
     [els.down, () => apply({ kind: 'arrow', dx: 0, dy: -1, big: false })],
-    [
-      els.nudgeMode,
-      () => {
-        setMode(adjust, 'nudge');
-        changed();
-      },
-    ],
-    [
-      els.bendMode,
-      () => {
-        setMode(adjust, 'bend');
-        changed();
-      },
-    ],
+    [els.selectMode, () => apply({ kind: 'use', mode: 'select' })],
+    [els.nudgeMode, () => apply({ kind: 'use', mode: 'nudge' })],
+    [els.bendMode, () => apply({ kind: 'use', mode: 'bend' })],
     [
       els.reset,
       () => {

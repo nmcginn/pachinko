@@ -3,6 +3,7 @@
 // or, in bend mode, lean it 0.5°, and a move into another nail is refused
 // with the reason.
 
+import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { clickBoard } from './boardview';
 
@@ -34,7 +35,7 @@ test('E opens the panel; a click selects a nail; arrows and buttons nudge it 0.1
   await page.keyboard.press('e');
   await expect(panel(page)).toBeVisible();
   await expect(page.locator('#adjust')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#adjust-selection')).toHaveText('Click or tap a nail to select it');
+  await expect(page.locator('#adjust-selection')).toHaveText('Tap a nail, or use Select (S)');
 
   const right = START_NAILS[1];
   await clickBoard(page, right.x + 0.0005, right.y);
@@ -162,4 +163,73 @@ test('play pauses while adjusting: balls wait, the handle does nothing, and play
   await page.keyboard.down('Space');
   await expect.poll(async () => (await counts(page)).launched).toBeGreaterThan(paused.launched);
   await page.keyboard.up('Space');
+});
+
+test('keyboard only (M8): Tab to Adjust nails, S, then the arrows walk the selection to a start nail; N nudges it', async ({
+  page,
+}) => {
+  const classic = JSON.parse(await readFile('boards/classic.json', 'utf8')) as {
+    nails: [number, number][];
+  };
+  // Tab to the button and press it, as someone without a pointer would.
+  for (let i = 0; i < 20; i++) {
+    await page.keyboard.press('Tab');
+    if (await page.locator('#adjust').evaluate((el) => el === document.activeElement)) break;
+  }
+  await page.keyboard.press('Enter');
+  await expect(panel(page)).toBeVisible();
+  await expect(page.locator('#adjust-selection')).toHaveText('Tap a nail, or use Select (S)');
+
+  await page.keyboard.press('s');
+  await expect(panel(page)).toHaveAttribute('data-mode', 'select');
+  await expect(page.locator('#mode-select')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Select next nail down' })).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  await expect(panel(page)).not.toHaveAttribute('data-selected', '');
+
+  // Down the field, then across, to one of the two start nails.
+  const selected = async () => Number(await panel(page).getAttribute('data-selected'));
+  for (let i = 0; i < 40; i++) {
+    const at = await selected();
+    if (at === 0 || at === 1) break;
+    const [x, y] = classic.nails[at] as [number, number];
+    await page.keyboard.press(y > 0.2 ? 'ArrowDown' : x < 0.25 ? 'ArrowRight' : 'ArrowLeft');
+    await expect(panel(page)).not.toHaveAttribute('data-selected', String(at));
+  }
+  const start = await selected();
+  expect([0, 1]).toContain(start);
+  // Selecting moved nothing, and the handle stayed where it was.
+  await expect(panel(page)).toHaveAttribute('data-moved', '0');
+  await expect(page.locator('#handle')).toHaveAttribute('data-power', '0.500');
+  // The two start nails are each other's neighbours across the pocket.
+  await page.keyboard.press(start === 0 ? 'ArrowRight' : 'ArrowLeft');
+  await expect(panel(page)).toHaveAttribute('data-selected', String(1 - start));
+  await page.keyboard.press(start === 0 ? 'ArrowLeft' : 'ArrowRight');
+  await expect(panel(page)).toHaveAttribute('data-selected', String(start));
+
+  await page.keyboard.press('n');
+  await expect(panel(page)).toHaveAttribute('data-mode', 'nudge');
+  await page.keyboard.press(start === 0 ? 'ArrowLeft' : 'ArrowRight');
+  await expect(panel(page)).toHaveAttribute('data-offset', start === 0 ? '-1,0' : '1,0');
+  await expect(panel(page)).toHaveAttribute('data-moved', '1');
+});
+
+test('select mode on a touch screen: the panel arrows pick nails, and a nail with none further that way says so', async ({
+  page,
+}) => {
+  await page.keyboard.press('e');
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await expect(panel(page)).toHaveAttribute('data-mode', 'select');
+  await page.getByRole('button', { name: 'Select next nail left' }).click();
+  await expect(panel(page)).not.toHaveAttribute('data-selected', '');
+  // Left until the edge of the field.
+  for (let i = 0; i < 30; i++) {
+    if (await page.locator('#adjust-problem').isVisible()) break;
+    await page.getByRole('button', { name: 'Select next nail left' }).click();
+  }
+  await expect(page.locator('#adjust-problem')).toHaveText('No nail further left');
+  await expect(panel(page)).not.toHaveAttribute('data-selected', '');
+  await page.getByRole('button', { name: 'Select next nail right' }).click();
+  await expect(page.locator('#adjust-problem')).toBeHidden();
+  await expect(panel(page)).toHaveAttribute('data-moved', '0');
 });

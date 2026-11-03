@@ -7,7 +7,9 @@ import {
   BIG_LEAN_STEPS,
   BIG_NUDGE_STEPS,
   MODE_CODE,
+  NUDGE_CODE,
   PICK_REACH_PX,
+  SELECT_CODE,
   adjustKeyAction,
   arrowSteps,
   bindAdjust,
@@ -89,6 +91,31 @@ describe('adjustKeyAction', () => {
     expect(adjustKeyAction(key({ code: 'KeyB', altKey: true }), true)).toBeNull();
   });
 
+  it('S and N pick select and nudge mode in edit mode only, not on repeat nor with Ctrl, Cmd or Alt', () => {
+    expect(SELECT_CODE).toBe('KeyS');
+    expect(NUDGE_CODE).toBe('KeyN');
+    expect(adjustKeyAction(key({ code: 'KeyS', key: 's' }), true)).toEqual({
+      kind: 'use',
+      mode: 'select',
+    });
+    expect(adjustKeyAction(key({ code: 'KeyN', key: 'n' }), true)).toEqual({
+      kind: 'use',
+      mode: 'nudge',
+    });
+    for (const code of ['KeyS', 'KeyN']) {
+      expect(adjustKeyAction(key({ code }), false)).toBeNull();
+      expect(adjustKeyAction(key({ code, repeat: true }), true)).toBeNull();
+      expect(adjustKeyAction(key({ code, ctrlKey: true }), true)).toBeNull();
+      expect(adjustKeyAction(key({ code, metaKey: true }), true)).toBeNull();
+      expect(adjustKeyAction(key({ code, altKey: true }), true)).toBeNull();
+    }
+  });
+
+  it('selecting takes one nail a press, with Shift too', () => {
+    expect(arrowSteps('select', false)).toBe(1);
+    expect(arrowSteps('select', true)).toBe(1);
+  });
+
   it('out of edit mode, arrows and Escape are left to the handle', () => {
     expect(adjustKeyAction(key({ key: 'ArrowLeft' }), false)).toBeNull();
     expect(adjustKeyAction(key({ key: 'Escape' }), false)).toBeNull();
@@ -115,6 +142,7 @@ describe('bindAdjust', () => {
       up: element(),
       down: element(),
       reset: element(),
+      selectMode: element(),
       nudgeMode: element(),
       bendMode: element(),
     };
@@ -190,10 +218,17 @@ describe('bindAdjust', () => {
     const canvas = element();
     const els = {
       ...Object.fromEntries(
-        ['toggle', 'left', 'right', 'up', 'down', 'reset', 'nudgeMode', 'bendMode'].map((k) => [
-          k,
-          element(),
-        ]),
+        [
+          'toggle',
+          'left',
+          'right',
+          'up',
+          'down',
+          'reset',
+          'selectMode',
+          'nudgeMode',
+          'bendMode',
+        ].map((k) => [k, element()]),
       ),
       canvas,
     } as unknown as Parameters<typeof bindAdjust>[1];
@@ -264,11 +299,65 @@ describe('bindAdjust', () => {
     expect(adjust.offsets.size).toBe(0);
   });
 
+  it('selects nails from the keyboard alone: E, S, then the arrows; N or B to move the one picked', () => {
+    const { table, adjust, els, press, click, changes } = setup();
+    press({ code: 'KeyE' });
+    const e = press({ code: 'KeyS', key: 's' });
+    expect(e.defaultPrevented).toBe(true);
+    expect(adjust.mode).toBe('select');
+    // The first arrow, any way, picks the nail nearest the board's middle.
+    press({ key: 'ArrowDown' });
+    const first = adjust.selected;
+    expect(first).not.toBeNull();
+    // Down the field to the start nails: the arrows only ever select.
+    for (let i = 0; i < 40 && adjust.selected !== 0 && adjust.selected !== 1; i++) {
+      const at = table.board.nails[adjust.selected as number];
+      if (!at) throw new Error('no selection');
+      press({ key: at.y > 0.2 ? 'ArrowDown' : at.x < 0.25 ? 'ArrowRight' : 'ArrowLeft' });
+    }
+    expect([0, 1]).toContain(adjust.selected);
+    expect(adjust.offsets.size).toBe(0);
+    expect(adjust.leans.size).toBe(0);
+    expect(table.board.nails).toEqual(classic.nails);
+    // Shift doesn't move the nail either.
+    const before = adjust.selected;
+    press({ key: 'ArrowLeft', shiftKey: true });
+    expect(adjust.offsets.size).toBe(0);
+    expect(adjust.selected).not.toBe(before);
+    press({ key: 'ArrowRight' });
+    expect(adjust.selected).toBe(before);
+    // N: the arrows nudge the nail picked.
+    press({ code: 'KeyN', key: 'n' });
+    expect(adjust.mode).toBe('nudge');
+    press({ key: 'ArrowRight' });
+    expect(adjust.offsets.get(before as number)).toEqual({ dx: 1, dy: 0 });
+    // B from select mode bends, as from nudge mode.
+    press({ code: 'KeyS' });
+    press({ code: 'KeyB' });
+    expect(adjust.mode).toBe('bend');
+    press({ code: 'KeyB' });
+    expect(adjust.mode).toBe('nudge');
+    // The panel's buttons: Select, then the arrow buttons pick nails.
+    const n = changes();
+    click(els.selectMode);
+    expect(adjust.mode).toBe('select');
+    expect(changes()).toBe(n + 1);
+    const nailsBefore = table.board.nails;
+    click(els.up);
+    expect(adjust.selected).not.toBe(before);
+    expect(adjust.selected).not.toBeNull();
+    click(els.down);
+    expect(table.board.nails).toBe(nailsBefore);
+    expect(adjust.offsets.get(before as number)).toEqual({ dx: 1, dy: 0 });
+  });
+
   it('leaves the arrow keys alone out of edit mode, and stops after unbinding', () => {
     const { adjust, press, unbind } = setup();
     const e = press({ key: 'ArrowRight' });
     expect(e.defaultPrevented).toBe(false);
     expect(press({ code: 'KeyB' }).defaultPrevented).toBe(false);
+    expect(press({ code: 'KeyS' }).defaultPrevented).toBe(false);
+    expect(press({ code: 'KeyN' }).defaultPrevented).toBe(false);
     expect(adjust.mode).toBe('nudge');
     unbind();
     press({ code: 'KeyE' });

@@ -82,12 +82,15 @@ function leanDeg(steps: number, plus: string, minus: string): string | null {
   return `${(Math.abs(steps) * BEND_STEP_DEG).toFixed(1)}° ${steps > 0 ? plus : minus}`;
 }
 
+/** What the panel says with no nail selected: how to select one, by pointer or by keyboard. */
+export const NO_SELECTION = 'Tap a nail, or use Select (S)';
+
 /** What the panel says about the selection: pure, for tests. */
 export function describeSelection(adjust: Adjust, board: Board): string {
   const offset = selectedOffset(adjust);
   const lean = selectedLean(adjust);
   const n = adjust.selected === null ? undefined : board.nails[adjust.selected];
-  if (!offset || !lean || !n) return 'Click or tap a nail to select it';
+  if (!offset || !lean || !n) return NO_SELECTION;
   const parts = [`Nail ${adjust.selected} at ${mm(n.x)}, ${mm(n.y)} mm`];
   if (offset.dx !== 0 || offset.dy !== 0)
     parts.push(`nudged ${offsetMm(offset.dx)}, ${offsetMm(offset.dy)} mm`);
@@ -101,8 +104,12 @@ export function describeSelection(adjust: Adjust, board: Board): string {
 
 const ARROW_NAMES = ['left', 'right', 'up', 'down'] as const;
 
-/** What an arrow button says it does, in a mode: "Nudge left 0.1 mm", "Lean up 0.5°". */
+/**
+ * What an arrow button says it does, in a mode: "Select next nail left",
+ * "Nudge left 0.1 mm", "Lean up 0.5°".
+ */
 export function arrowLabel(mode: AdjustMode, arrow: (typeof ARROW_NAMES)[number]): string {
+  if (mode === 'select') return `Select next nail ${arrow}`;
   return mode === 'nudge'
     ? `Nudge ${arrow} ${mm(NAIL_STEP_M)} mm`
     : `Lean ${arrow} ${BEND_STEP_DEG.toFixed(1)}°`;
@@ -120,6 +127,7 @@ export interface AdjustPanelElements {
   /** Gets the `editing` class while editing, for the page's styles. */
   readonly root: HTMLElement;
   /** The mode buttons: aria-pressed on the one in use. */
+  readonly selectMode: HTMLElement;
   readonly nudgeMode: HTMLElement;
   readonly bendMode: HTMLElement;
   /** The arrow buttons, labelled for the mode. */
@@ -150,6 +158,7 @@ export function createAdjustPanel(els: AdjustPanelElements): AdjustPanel {
       els.panel.dataset['moved'] = String(moved);
       els.panel.dataset['notice'] = adjust.notice ?? '';
       els.panel.dataset['mode'] = adjust.mode;
+      els.selectMode.setAttribute('aria-pressed', String(adjust.mode === 'select'));
       els.nudgeMode.setAttribute('aria-pressed', String(adjust.mode === 'nudge'));
       els.bendMode.setAttribute('aria-pressed', String(adjust.mode === 'bend'));
       for (const arrow of ARROW_NAMES) {
