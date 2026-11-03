@@ -6,12 +6,15 @@ import {
   MAX_LEAN_STEPS,
   NAIL_STEP_M,
   createAdjust,
+  firstNail,
   leanSelected,
   leanShiftM,
+  nailToward,
   movedNails,
   nudgeSelected,
   resetSelected,
   selectNailAt,
+  selectToward,
   selectedLean,
   selectedOffset,
   setEditing,
@@ -442,4 +445,145 @@ describe('bending a nail', () => {
       2 * Math.hypot(before.spinsPer1000YenSe, after.spinsPer1000YenSe),
     );
   }, 30_000);
+});
+
+describe('selecting from the keyboard (M8)', () => {
+  const grid = (cols: number, rows: number, pitchM = 0.01) =>
+    Array.from({ length: cols * rows }, (_, i) => ({
+      x: (i % cols) * pitchM,
+      y: Math.floor(i / cols) * pitchM,
+    }));
+
+  it('goes to the nearest nail each way on a square grid, and back again', () => {
+    const nails = grid(3, 3); // index = 3 * row + column, row 0 at the bottom
+    expect(nailToward(nails, 4, 1, 0)).toBe(5);
+    expect(nailToward(nails, 4, -1, 0)).toBe(3);
+    expect(nailToward(nails, 4, 0, 1)).toBe(7);
+    expect(nailToward(nails, 4, 0, -1)).toBe(1);
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as const) {
+      const next = nailToward(nails, 4, dx, dy);
+      expect(nailToward(nails, next as number, -dx, -dy)).toBe(4);
+    }
+    // At the edge, nothing further that way.
+    expect(nailToward(nails, 5, 1, 0)).toBeNull();
+    expect(nailToward(nails, 0, 0, -1)).toBeNull();
+    expect(nailToward(nails, 0, -1, 0)).toBeNull();
+  });
+
+  it('takes nails up to 45° off the line, nearest first, then the nearer the line, then the lower index', () => {
+    const at = { x: 0, y: 0 };
+    // Exactly 45° counts; just past it doesn't.
+    expect(nailToward([at, { x: 0.01, y: 0.01 }], 0, 1, 0)).toBe(1);
+    expect(nailToward([at, { x: 0.01, y: 0.0101 }], 0, 1, 0)).toBeNull();
+    // Nearest wins over straighter.
+    expect(nailToward([at, { x: 0.02, y: 0 }, { x: 0.01, y: 0.005 }], 0, 1, 0)).toBe(2);
+    // Equally near (3-4-5): the one nearer the line.
+    expect(nailToward([at, { x: 0.03, y: 0.04 }, { x: 0.04, y: 0.03 }], 0, 1, 0)).toBe(2);
+    // Mirror images: the lower index.
+    expect(nailToward([at, { x: 0.01, y: -0.005 }, { x: 0.01, y: 0.005 }], 0, 1, 0)).toBe(1);
+    // Two nails in one place: the other one is no way from it.
+    expect(nailToward([at, { x: 0, y: 0 }], 0, 1, 0)).toBeNull();
+    // No such nail to start from.
+    expect(nailToward([at], 5, 1, 0)).toBeNull();
+  });
+
+  it('starts from the nail nearest the middle of the board', () => {
+    const nails = grid(3, 3);
+    expect(firstNail(nails, 0.02, 0.02)).toBe(4);
+    expect(firstNail(nails, 0.04, 0.04)).toBe(8);
+    expect(firstNail([], 1, 1)).toBeNull();
+    // A tie: the lower index.
+    expect(
+      firstNail(
+        [
+          { x: 0, y: 0 },
+          { x: 1, y: 1 },
+        ],
+        1,
+        1,
+      ),
+    ).toBe(0);
+  });
+
+  it('reaches every nail on the classic board from the first one by arrows alone', () => {
+    const start = firstNail(classic.nails, classic.widthM, classic.heightM) as number;
+    expect(start).not.toBeNull();
+    const seen = new Set([start]);
+    const todo = [start];
+    while (todo.length > 0) {
+      const i = todo.pop() as number;
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const) {
+        const next = nailToward(classic.nails, i, dx, dy);
+        if (next !== null && !seen.has(next)) {
+          seen.add(next);
+          todo.push(next);
+        }
+      }
+    }
+    expect(seen.size).toBe(classic.nails.length);
+  });
+
+  it("on the classic board, the start nails are each other's neighbours across the pocket", () => {
+    expect(nailToward(classic.nails, LEFT, 1, 0)).toBe(RIGHT);
+    expect(nailToward(classic.nails, RIGHT, -1, 0)).toBe(LEFT);
+  });
+
+  it('selectToward selects the first nail with none selected, then moves the selection, never a nail', () => {
+    const table = createTable(classic);
+    const adjust = createAdjust(table);
+    const first = firstNail(classic.nails, classic.widthM, classic.heightM);
+    expect(selectToward(adjust, table, 0, -1)).toBe(first);
+    expect(adjust.selected).toBe(first);
+    const next = selectToward(adjust, table, 0, -1);
+    expect(next).toBe(nailToward(classic.nails, first as number, 0, -1));
+    expect(adjust.selected).toBe(next);
+    expect(table.board.nails).toEqual(classic.nails);
+    expectInSync(table);
+    expect(adjust.offsets.size).toBe(0);
+  });
+
+  it('selectToward refuses past the last nail that way, keeping the selection, and the next success clears it', () => {
+    const table = createTable(classic);
+    const adjust = createAdjust(table);
+    // The leftmost nail: nothing further left.
+    const leftmost = classic.nails.reduce(
+      (best, n, i) => (n.x < (classic.nails[best] as { x: number }).x ? i : best),
+      0,
+    );
+    adjust.selected = leftmost;
+    expect(selectToward(adjust, table, -1, 0)).toBeNull();
+    expect(adjust.selected).toBe(leftmost);
+    expect(adjust.problem).toBe('No nail further left');
+    expect(selectToward(adjust, table, 1, 0)).not.toBeNull();
+    expect(adjust.problem).toBeNull();
+    // Not a unit step on one axis.
+    expect(selectToward(adjust, table, 1, 1)).toBeNull();
+    expect(adjust.problem).toBe('Select left, right, up or down, got (1, 1)');
+  });
+
+  it('selectToward on a board with no nails refuses, selecting nothing', () => {
+    const table = createTable({ ...classic, nails: [] });
+    const adjust = createAdjust(table);
+    expect(selectToward(adjust, table, 1, 0)).toBeNull();
+    expect(adjust.selected).toBeNull();
+    expect(adjust.problem).toBe('This board has no nails');
+  });
+
+  it('goes by where the nails are now: a nail nudged past its neighbour swaps places in the order', () => {
+    const nails = grid(3, 1);
+    expect(nailToward(nails, 0, 1, 0)).toBe(1);
+    const moved = [nails[0], { x: 0.025, y: 0 }, nails[2]] as typeof nails;
+    expect(nailToward(moved, 0, 1, 0)).toBe(2);
+    expect(nailToward(moved, 2, 1, 0)).toBe(1);
+  });
 });

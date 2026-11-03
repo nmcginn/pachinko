@@ -59,13 +59,17 @@ export interface NailLean {
   readonly ly: number;
 }
 
-/** What the arrows do in edit mode: nudge the selected nail, or bend it. */
-export type AdjustMode = 'nudge' | 'bend';
+/**
+ * What the arrows do in edit mode: move the selection to the next nail that
+ * way (M8, so a nail can be picked without a pointer), nudge the selected
+ * nail, or bend it.
+ */
+export type AdjustMode = 'select' | 'nudge' | 'bend';
 
 export interface Adjust {
   /** Edit mode is on. The table isn't stepped while it is. */
   editing: boolean;
-  /** Whether the arrows nudge or bend. Kept when edit mode is left. */
+  /** Whether the arrows select, nudge or bend. Kept when edit mode is left. */
   mode: AdjustMode;
   /** Index into the board's nails (and the world's circles), or null for none. */
   selected: number | null;
@@ -113,7 +117,7 @@ export function setEditing(adjust: Adjust, editing: boolean): void {
   clearMessages(adjust);
 }
 
-/** Switch the arrows between nudging and bending. Clears any refusal. */
+/** Switch the arrows between selecting, nudging and bending. Clears any refusal. */
 export function setMode(adjust: Adjust, mode: AdjustMode): void {
   adjust.mode = mode;
   clearMessages(adjust);
@@ -148,6 +152,101 @@ export function selectNailAt(
   adjust.selected = best;
   clearMessages(adjust);
   return best;
+}
+
+/**
+ * How far either side of a direction a nail may lie and still count as
+ * that way from another: 45°, so the four arrows' cones meet and every
+ * nail is up, down, left or right of any other (on a cone's edge, both).
+ */
+const TOWARD_CONE_TAN = 1;
+
+/**
+ * The nail an arrow goes to from nail `from`, `(dx, dy)` being a unit
+ * direction, x right and y up: the nearest nail within 45° of that way,
+ * ties going to the one nearer the line through `from` that way, then to
+ * the lower index; or, with none that close to the line, null. Pure, and
+ * on the board as it stands (moved nails where they are now).
+ */
+export function nailToward(
+  nails: readonly Vec2[],
+  from: number,
+  dx: number,
+  dy: number,
+): number | null {
+  const at = nails[from];
+  if (!at) return null;
+  let best: number | null = null;
+  let bestD = Infinity;
+  let bestPerp = Infinity;
+  nails.forEach((n, i) => {
+    if (i === from) return;
+    const ox = n.x - at.x;
+    const oy = n.y - at.y;
+    const along = ox * dx + oy * dy;
+    const perp = Math.abs(ox * dy - oy * dx);
+    if (!(along > 0) || perp > along * TOWARD_CONE_TAN) return;
+    const d = Math.hypot(ox, oy);
+    if (d < bestD || (d === bestD && perp < bestPerp)) {
+      best = i;
+      bestD = d;
+      bestPerp = perp;
+    }
+  });
+  return best;
+}
+
+/**
+ * The nail to select first from the keyboard, with none selected: the one
+ * nearest the middle of the board, lower index on a tie, or null on a
+ * board with no nails.
+ */
+export function firstNail(nails: readonly Vec2[], widthM: number, heightM: number): number | null {
+  let best: number | null = null;
+  let bestD = Infinity;
+  nails.forEach((n, i) => {
+    const d = Math.hypot(n.x - widthM / 2, n.y - heightM / 2);
+    if (d < bestD) {
+      best = i;
+      bestD = d;
+    }
+  });
+  return best;
+}
+
+const DIRECTION_NAMES: Record<string, string> = {
+  '-1,0': 'left',
+  '1,0': 'right',
+  '0,1': 'up',
+  '0,-1': 'down',
+};
+
+/**
+ * Select the next nail from the selected one in direction (dx, dy), a unit
+ * step on one axis, x right and y up (nailToward). With nothing selected,
+ * select the nail nearest the middle of the board (firstNail) whichever
+ * way. Refused, with the selection kept and the reason in `problem`, if no
+ * nail lies that way, or the board has no nails. Returns the selection, or
+ * null if refused.
+ */
+export function selectToward(adjust: Adjust, table: Table, dx: number, dy: number): number | null {
+  const { nails, widthM, heightM } = table.board;
+  const direction = DIRECTION_NAMES[`${dx},${dy}`];
+  if (direction === undefined) {
+    refuse(adjust, `Select left, right, up or down, got (${dx}, ${dy})`);
+    return null;
+  }
+  const next =
+    adjust.selected === null
+      ? firstNail(nails, widthM, heightM)
+      : nailToward(nails, adjust.selected, dx, dy);
+  if (next === null) {
+    refuse(adjust, nails.length === 0 ? 'This board has no nails' : `No nail further ${direction}`);
+    return null;
+  }
+  adjust.selected = next;
+  clearMessages(adjust);
+  return next;
 }
 
 /** The selected nail's offset in steps: zero if it hasn't moved, null with no selection. */
