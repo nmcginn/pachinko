@@ -18,7 +18,7 @@ describe('describeSelection', () => {
   it('asks for a selection when there is none', () => {
     const table = createTable(classic);
     const adjust = createAdjust(table);
-    expect(describeSelection(adjust, table.board)).toBe('Click or tap a nail to select it');
+    expect(describeSelection(adjust, table.board)).toBe('Tap a nail, or use Select (S)');
   });
 
   it('names the nail, gives its position and its nudge in signed millimetres', () => {
@@ -69,6 +69,8 @@ describe('arrowLabel', () => {
     expect(arrowLabel('nudge', 'down')).toBe('Nudge down 0.1 mm');
     expect(arrowLabel('bend', 'up')).toBe('Lean up 0.5°');
     expect(arrowLabel('bend', 'right')).toBe('Lean right 0.5°');
+    expect(arrowLabel('select', 'left')).toBe('Select next nail left');
+    expect(arrowLabel('select', 'up')).toBe('Select next nail up');
   });
 });
 
@@ -96,6 +98,7 @@ describe('createAdjustPanel', () => {
       selection: element(),
       problem: element(),
       root: element(),
+      selectMode: element(),
       nudgeMode: element(),
       bendMode: element(),
       arrows: { left: element(), right: element(), up: element(), down: element() },
@@ -126,6 +129,16 @@ describe('createAdjustPanel', () => {
     // A bent nail counts as moved, though it has no nudge.
     expect(els.panel.dataset['moved']).toBe('1');
     expect(els.selection.textContent).toBe('Nail 0 at 242.7, 178.0 mm, leaning 1.0° left');
+    expect(els.selectMode.getAttribute('aria-pressed')).toBe('false');
+
+    adjust.mode = 'select';
+    panel.update(adjust, table.board);
+    expect(els.panel.dataset['mode']).toBe('select');
+    expect(els.selectMode.getAttribute('aria-pressed')).toBe('true');
+    expect(els.nudgeMode.getAttribute('aria-pressed')).toBe('false');
+    expect(els.bendMode.getAttribute('aria-pressed')).toBe('false');
+    expect(els.arrows.down.getAttribute('aria-label')).toBe('Select next nail down');
+    expect(els.arrows.down.title).toBe('Select next nail down');
   });
 
   it('says what an export or import did in place of the selection, until the next action', () => {
@@ -135,6 +148,7 @@ describe('createAdjustPanel', () => {
       selection: element(),
       problem: element(),
       root: element(),
+      selectMode: element(),
       nudgeMode: element(),
       bendMode: element(),
       arrows: { left: element(), right: element(), up: element(), down: element() },
@@ -159,7 +173,7 @@ describe('createAdjustPanel', () => {
     importBoard(adjust, table, '{}');
     panel.update(adjust, table.board);
     expect(els.problem.textContent).toMatch(/^Can't import that board: name: /);
-    expect(els.selection.textContent).toBe('Click or tap a nail to select it');
+    expect(els.selection.textContent).toBe('Tap a nail, or use Select (S)');
     expect(els.panel.dataset['notice']).toBe('');
   });
 });

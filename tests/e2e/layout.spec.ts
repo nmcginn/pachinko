@@ -183,13 +183,20 @@ for (const s of SIZES) {
       await expect(page.locator('#adjust-panel')).toBeVisible();
       await expect(page.locator('#adjust-stats')).toBeVisible();
       await expectBoardClear(page, s.edit);
-      // Every control the panel needs is on screen.
-      for (const id of ['adjust', 'nudge-left', 'nudge-reset', 'board-export', 'board-import']) {
+      // Every control the panel needs is on screen, top to bottom and side
+      // to side (at 320 px the panel once ran off the right edge), and 44 px tall.
+      const panelIds = ['adjust', 'mode-select', 'mode-nudge', 'mode-bend'];
+      panelIds.push('board-export', 'board-import', 'nudge-left', 'nudge-up', 'nudge-down');
+      panelIds.push('nudge-right', 'nudge-reset');
+      for (const id of panelIds) {
         const box = await page.locator(`#${id}`).boundingBox();
         expect(box, id).not.toBeNull();
         if (!box) continue;
+        expect(box.height, id).toBeGreaterThanOrEqual(44);
         expect(box.y, id).toBeGreaterThanOrEqual(0);
         expect(box.y + box.height, id).toBeLessThanOrEqual(s.height);
+        expect(box.x, id).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width, id).toBeLessThanOrEqual(s.width);
       }
 
       // A start nail, by the start pocket, can be picked where the board now is.
