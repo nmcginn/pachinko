@@ -119,7 +119,13 @@ export function inFormField(e: Event): boolean {
 
 /**
  * Pointer (mouse, touch, pen) on the dial element. A press while
- * `active()` is false is ignored. Returns an unbind function.
+ * `active()` is false is ignored. One pointer at a time: a second finger
+ * on the dial while the first holds it is ignored. The first keeps the dial
+ * after sliding off it (pointer capture) and lets go when it lifts or the
+ * browser cancels it. Holding a finger still on the dial is how the game is
+ * played, and Android browsers send `contextmenu` for a long press; that is
+ * cancelled here, so no menu opens over the handle. Returns an unbind
+ * function.
  */
 export function bindDial(
   dial: HTMLElement,
@@ -153,14 +159,17 @@ export function bindDial(
     pointer = null;
     holds.set('dial', false);
   };
+  const menu = (e: Event): void => e.preventDefault();
   dial.addEventListener('pointerdown', press);
   dial.addEventListener('pointermove', move);
   dial.addEventListener('pointerup', release);
   dial.addEventListener('pointercancel', release);
+  dial.addEventListener('contextmenu', menu);
   return () => {
     dial.removeEventListener('pointerdown', press);
     dial.removeEventListener('pointermove', move);
     dial.removeEventListener('pointerup', release);
     dial.removeEventListener('pointercancel', release);
+    dial.removeEventListener('contextmenu', menu);
   };
 }

@@ -4,6 +4,7 @@ import {
   DIAL_SWEEP_DEG,
   POWER_STEP,
   stepPower,
+  bindDial,
   bindKeyboard,
   createHolds,
   dialAngleToPower,
@@ -174,5 +175,116 @@ describe('keyboard', () => {
     expect(inFormField(ev({ tagName: 'BODY' }))).toBe(false);
     expect(inFormField(ev(null))).toBe(false);
     expect(inFormField(ev({}))).toBe(false);
+  });
+});
+
+describe('dial', () => {
+  /** A 100 px dial with its centre at (150, 250), as getBoundingClientRect gives it. */
+  const BOX = { left: 100, top: 200, width: 100, height: 100 };
+  const CX = 150;
+  const CY = 250;
+
+  function setup(active?: () => boolean) {
+    const target = new EventTarget();
+    const captured: number[] = [];
+    const dial = Object.assign(target, {
+      getBoundingClientRect: () => BOX,
+      setPointerCapture: (id: number) => captured.push(id),
+    }) as unknown as HTMLElement;
+    const fire = createFireControl();
+    const unbind = bindDial(dial, fire, createHolds(fire), active);
+    const send = (type: string, pointerId: number, clientX = CX, clientY = CY) => {
+      const e = new Event(type, { cancelable: true });
+      Object.assign(e, { pointerId, clientX, clientY });
+      target.dispatchEvent(e);
+      return e;
+    };
+    return { fire, send, unbind, captured };
+  }
+
+  it('a press holds fire and aims; turning sets the power; lifting lets go', () => {
+    const { fire, send, captured } = setup();
+    // 3 o'clock: 90° clockwise from up.
+    const down = send('pointerdown', 1, CX + 40, CY);
+    expect(down.defaultPrevented).toBe(true);
+    expect(captured).toEqual([1]);
+    expect(fire.held).toBe(true);
+    expect(fire.power).toBeCloseTo(225 / 270, 12);
+    // 12 o'clock: power 0.5.
+    send('pointermove', 1, CX, CY - 40);
+    expect(fire.power).toBeCloseTo(0.5, 12);
+    send('pointerup', 1, CX, CY - 40);
+    expect(fire.held).toBe(false);
+    expect(fire.power).toBeCloseTo(0.5, 12);
+  });
+
+  it('keeps aiming with a finger slid off the dial, by its angle from the centre', () => {
+    const { fire, send } = setup();
+    send('pointerdown', 1, CX, CY - 40);
+    // Far to the left of the dial: 9 o'clock, power 45 / 270.
+    send('pointermove', 1, CX - 300, CY);
+    expect(fire.held).toBe(true);
+    expect(fire.power).toBeCloseTo(45 / 270, 12);
+  });
+
+  it('keeps the power when the finger is too near the centre to aim', () => {
+    const { fire, send } = setup();
+    send('pointerdown', 1, CX, CY - 40);
+    send('pointermove', 1, CX + 9, CY + 1);
+    expect(fire.power).toBeCloseTo(0.5, 12);
+    // A press right on the centre holds without moving the power either.
+    send('pointerup', 1);
+    send('pointerdown', 2, CX, CY);
+    expect(fire).toMatchObject({ held: true, power: 0.5 });
+  });
+
+  it('ignores a second finger while the first holds the dial', () => {
+    const { fire, send, captured } = setup();
+    send('pointerdown', 1, CX, CY - 40);
+    send('pointerdown', 2, CX + 40, CY);
+    send('pointermove', 2, CX - 40, CY);
+    expect(captured).toEqual([1]);
+    expect(fire.power).toBeCloseTo(0.5, 12);
+    // The second finger lifting doesn't let go of the first's hold.
+    send('pointerup', 2, CX - 40, CY);
+    expect(fire.held).toBe(true);
+    send('pointerup', 1);
+    expect(fire.held).toBe(false);
+  });
+
+  it('lets go when the browser cancels the pointer, and takes the next press', () => {
+    const { fire, send } = setup();
+    send('pointerdown', 1, CX, CY - 40);
+    send('pointercancel', 1);
+    expect(fire.held).toBe(false);
+    send('pointerdown', 2, CX + 40, CY);
+    expect(fire.held).toBe(true);
+  });
+
+  it('cancels the long-press context menu', () => {
+    const { send } = setup();
+    expect(send('contextmenu', 1).defaultPrevented).toBe(true);
+  });
+
+  it('ignores a press while inactive (adjusting nails, the settings open)', () => {
+    let active = false;
+    const { fire, send } = setup(() => active);
+    const e = send('pointerdown', 1, CX + 40, CY);
+    expect(e.defaultPrevented).toBe(false);
+    expect(fire).toMatchObject({ held: false, power: 0.5 });
+    // That pointer never held the dial, so its moves do nothing either.
+    send('pointermove', 1, CX - 40, CY);
+    expect(fire.power).toBe(0.5);
+    active = true;
+    send('pointerdown', 2, CX + 40, CY);
+    expect(fire.held).toBe(true);
+  });
+
+  it('does nothing after unbinding', () => {
+    const { fire, send, unbind } = setup();
+    unbind();
+    send('pointerdown', 1, CX + 40, CY);
+    expect(fire).toMatchObject({ held: false, power: 0.5 });
+    expect(send('contextmenu', 1).defaultPrevented).toBe(false);
   });
 });
